@@ -12,8 +12,9 @@ import os
 #------------------------------------
 # Check and activate Network Analyst extension
 #------------------------------------
-if arcpy.CheckExtension("Network") == "Available":                                 # Check if Network Analyst is available
-    arcpy.CheckOutExtension("Network")                                              # Check out extension
+if arcpy.CheckExtension("Network") == "Available":
+    arcpy.CheckOutExtension("Network")
+    # Activate Network Analyst
     arcpy.AddMessage("✔ Network Analyst extension checked out.")
 else:
     arcpy.AddError("❌ Network Analyst extension is not available.")
@@ -22,13 +23,19 @@ else:
 #------------------------------------
 # Input parameters
 #------------------------------------
-gdb_path             = arcpy.GetParameterAsText(0)                                   # Path to File Geodatabase
-network_dataset      = os.path.join(gdb_path, "NetworkData", "NetworkDataset")     # Full path to Network Dataset
-facilities_layer     = arcpy.GetParameterAsText(1)                                   # Access points layer
-output_service_area  = arcpy.GetParameterAsText(2)                                   # Output polygon layer
-travel_distance      = arcpy.GetParameterAsText(3)                                   # Travel distance (meters)
+gdb_path             = arcpy.GetParameterAsText(0)
+# Path to File Geodatabase
+network_dataset      = os.path.join(gdb_path, "NetworkData", "NetworkDataset")
+# Full path to network dataset
+facilities_layer     = arcpy.GetParameterAsText(1)
+# Access points layer (facilities)
+output_service_area  = arcpy.GetParameterAsText(2)
+# Output polygon layer path
+travel_distance      = arcpy.GetParameterAsText(3)
+# Travel distance in meters
 
-arcpy.env.overwriteOutput = True                                                     # Allow overwrite
+arcpy.env.overwriteOutput = True
+# Allow overwriting outputs
 
 #------------------------------------
 # Print header
@@ -73,6 +80,7 @@ arcpy.na.MakeServiceAreaLayer(
     merge                       = "NO_MERGE",
     nesting_type                = "RINGS"
 )
+# Create service area layer
 arcpy.AddMessage("✔ Service area layer created.")
 
 #------------------------------------
@@ -82,6 +90,7 @@ arcpy.AddMessage("Adding facilities to the analysis...")
 facility_count = int(arcpy.management.GetCount(facilities_layer)[0])
 arcpy.AddMessage(f"   → Number of input facilities: {facility_count}")
 arcpy.na.AddLocations(service_area_layer, "Facilities", facilities_layer)
+# Add access points to service area layer
 arcpy.AddMessage("✔ Facilities successfully added.")
 
 #------------------------------------
@@ -89,6 +98,7 @@ arcpy.AddMessage("✔ Facilities successfully added.")
 #------------------------------------
 arcpy.AddMessage("Solving network analysis...")
 arcpy.na.Solve(service_area_layer)
+# Solve the network service area
 arcpy.AddMessage("✔ Network analysis completed.")
 
 #------------------------------------
@@ -97,6 +107,7 @@ arcpy.AddMessage("✔ Network analysis completed.")
 arcpy.AddMessage("Exporting service area polygons...")
 temp_polygons = os.path.join(gdb_path, "temp_service_area")
 arcpy.management.CopyFeatures(service_area_layer + "\\Polygons", temp_polygons)
+# Export polygons to temporary feature class
 arcpy.AddMessage(f"✔ Temporary polygons saved: {temp_polygons}")
 
 #------------------------------------
@@ -109,7 +120,28 @@ if polygon_count == 0:
 
 arcpy.AddMessage("Dissolving polygons into single output...")
 arcpy.management.Dissolve(temp_polygons, output_service_area)
+# Dissolve all polygons into one final shape
 arcpy.AddMessage(f"✔ Final dissolved output saved to: {output_service_area}")
+
+#------------------------------------
+# Add travel distance attribute to output polygon
+#------------------------------------
+arcpy.AddMessage("Adding travel distance attribute to output polygon...")
+field_name = "distance_m"
+
+fields = [f.name for f in arcpy.ListFields(output_service_area)]
+if field_name not in fields:
+    arcpy.management.AddField(output_service_area, field_name, "DOUBLE")
+    arcpy.AddMessage(f"✔ Field '{field_name}' created.")
+else:
+    arcpy.AddMessage(f"✔ Field '{field_name}' already exists.")
+
+with arcpy.da.UpdateCursor(output_service_area, [field_name]) as cursor:
+    for row in cursor:
+        row[0] = float(travel_distance)
+        cursor.updateRow(row)
+
+arcpy.AddMessage(f"✔ Travel distance ({travel_distance} meters) written to field '{field_name}'.")
 
 #------------------------------------
 # Final checks and cleanup
@@ -121,6 +153,7 @@ if final_count != 1:
 
 arcpy.AddMessage("Cleaning up temporary data...")
 arcpy.management.Delete(temp_polygons)
+# Remove temporary data
 arcpy.AddMessage("✔ Temporary data deleted.")
 
 #------------------------------------
@@ -135,3 +168,4 @@ arcpy.AddMessage("")
 # Delete variables
 #------------------------------------
 del gdb_path, network_dataset, facilities_layer, output_service_area, travel_distance
+# Clean up variables
