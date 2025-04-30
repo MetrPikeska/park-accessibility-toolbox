@@ -1,141 +1,249 @@
 #------------------------------------
-# Name: 1_NetworkDataset.py
+# Name: 4_AnalyzeParkAccessibility.py
 # Author: Petr MIKESKA, Department of Geoinformatics, Faculty of Science, Palacký University Olomouc, 2025
 # Bachelor thesis title (EN): Assessing the availability of green spaces and parks for urban residents
 # Bachelor thesis title (CZ): Hodnocení dostupnosti zelených ploch a parků pro obyvatele měst
-# This script creates and builds a network dataset from input roads.
+# This script analyzes accessibility of green space within a defined walking distance for each city district.
 #------------------------------------
 
 import arcpy
 import os
-import sys
+from datetime import datetime
 
 #------------------------------------
-# General settings
+# Main analysis function
 #------------------------------------
-arcpy.env.overwriteOutput = True
-# Allow overwriting outputs
+def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fields_raw,
+                          output_gdb, distance_label, districts_fc, district_field):
+    arcpy.env.overwriteOutput = True  # Allow output overwriting
 
-#------------------------------------
-# Check and activate Network Analyst extension
-#------------------------------------
-if arcpy.CheckExtension("Network") == "Available":
-    arcpy.CheckOutExtension("Network")
-    # Activate Network Analyst
-    arcpy.AddMessage("✔ Network Analyst extension checked out.")
-else:
-    arcpy.AddError("❌ Network Analyst extension is not available.")
-    raise SystemExit()
-    # Stop script if extension is missing
+    distance_label = str(distance_label)  # Convert distance label to string if needed
+    suffix = f"{distance_label}m"  # Used for naming outputs
 
-#------------------------------------
-# Print header
-#------------------------------------
-arcpy.AddMessage("")
-arcpy.AddMessage("===================================================")
-arcpy.AddMessage("===         NETWORK DATASET CREATION START     ===")
-arcpy.AddMessage("===================================================")
-arcpy.AddMessage("Author: Petr Mikeska (Bachelor's thesis)")
-arcpy.AddMessage("---------------------------------------------------")
+    # Define output paths
+    output_points_fc = os.path.join(output_gdb, f"points_accessibility_{suffix}")
+    output_districts_fc = os.path.join(output_gdb, f"districts_accessibility_{suffix}")
+    access_area_clip = os.path.join("in_memory", f"access_area_clip_{suffix}")
+    output_folder = os.path.dirname(output_gdb)
 
-def create_network_dataset(input_roads, output_path):
-    if not output_path.endswith(".gdb"):
-        output_path = os.path.join(output_path, "NetworkDataset.gdb")
-    # Ensure output is a geodatabase
-
-    gdb_folder      = os.path.dirname(output_path)
-    # Path to folder
-
-    gdb_name        = os.path.basename(output_path)
-    # GDB file name
-
-    feature_dataset = os.path.join(output_path, "NetworkData")
-    # Path to feature dataset
-
-    network_name    = "NetworkDataset"
-    # Name of network dataset
-
-    network_dataset = os.path.join(feature_dataset, network_name)
-    # Full path to network dataset
-
-    network_roads   = os.path.join(feature_dataset, "Roads")
-    # Path to copied roads
-
-    arcpy.AddMessage(f"Input roads:        {input_roads}")
-    arcpy.AddMessage(f"Output folder:      {gdb_folder}")
-    arcpy.AddMessage(f"GDB name:           {gdb_name}")
-    arcpy.AddMessage(f"Network name:       {network_name}")
-    arcpy.AddMessage("---------------------------------------------------")
-
-    if not arcpy.Exists(output_path):
-        if not os.path.exists(gdb_folder):
-            os.makedirs(gdb_folder)
-        # Create folder if missing
-
-        arcpy.management.CreateFileGDB(gdb_folder, gdb_name)
-        # Create file geodatabase
-        arcpy.AddMessage("Geodatabase created.")
-
-    sr = arcpy.Describe(input_roads).spatialReference
-    # Get spatial reference from input
-
-    if not arcpy.Exists(feature_dataset):
-        arcpy.management.CreateFeatureDataset(output_path, "NetworkData", sr)
-        # Create feature dataset if missing
-        arcpy.AddMessage("Feature dataset 'NetworkData' created.")
-
-    if arcpy.Exists(network_roads):
-        arcpy.AddWarning("Roads already exist, skipping copy.")
-        # Avoid overwriting existing data
-    else:
-        arcpy.conversion.FeatureClassToFeatureClass(input_roads, feature_dataset, "Roads")
-        # Copy input roads
-        arcpy.AddMessage("Roads copied to 'NetworkData' dataset.")
-
-    if not arcpy.Exists(network_dataset):
-        try:
-            arcpy.na.CreateNetworkDataset(
-                feature_dataset=feature_dataset,
-                out_name=network_name,
-                source_feature_class_names="Roads",
-                elevation_model="ELEVATION_FIELDS"
-            )
-            # Create network dataset
-
-            arcpy.na.BuildNetwork(network_dataset)
-            # Build network dataset
-
-            arcpy.AddMessage("Network dataset created and built successfully.")
-        except arcpy.ExecuteError:
-            arcpy.AddError(arcpy.GetMessages(2))
-            raise SystemExit()
-            # Stop on failure
-
-    arcpy.AddMessage("---------------------------------------------------")
-    arcpy.AddMessage(f"Output GDB:         {output_path}")
-    arcpy.AddMessage(f"Output network:     {network_dataset}")
-
-    return network_dataset
-    # Return final network path
-
-#------------------------------------
-# Main script execution
-#------------------------------------
-if __name__ == "__main__":
-    input_roads = arcpy.GetParameterAsText(0)
-    # Input road layer
-
-    output_path = arcpy.GetParameterAsText(1)
-    # Output folder or GDB
-
-    network_dataset = create_network_dataset(input_roads, output_path)
-    # Run main creation function
-
+    # Log basic info
+    arcpy.AddMessage("")
     arcpy.AddMessage("===================================================")
-    arcpy.AddMessage("===         NETWORK DATASET CREATION DONE      ===")
+    arcpy.AddMessage("===       PARK ACCESSIBILITY ANALYSIS START     ===")
+    arcpy.AddMessage("===================================================")
+    arcpy.AddMessage("Author: Petr Mikeska (Bachelor's thesis)")
+    arcpy.AddMessage(f"Methodology: A short walk to the park – {distance_label} meters to green space")
+    arcpy.AddMessage("---------------------------------------------------")
+
+    #------------------------------------
+    # Validate existence of input data
+    #------------------------------------
+    for fc in [accessibility_fc, input_fc, districts_fc]:
+        if not arcpy.Exists(fc):
+            arcpy.AddError(f"ERROR: Input layer '{fc}' does not exist.")
+            return
+    if not output_gdb:
+        arcpy.AddError("ERROR: Output geodatabase not set.")
+        return
+
+    #------------------------------------
+    # Prepare working layer from input points
+    #------------------------------------
+    arcpy.management.MakeFeatureLayer(input_fc, "input_layer_temp")
+    arcpy.management.CopyFeatures("input_layer_temp", output_points_fc)
+    arcpy.management.MakeFeatureLayer(output_points_fc, "output_layer_temp")
+
+    # Add field to store access flag if not present
+    if "near_park" not in [f.name for f in arcpy.ListFields(output_points_fc)]:
+        arcpy.management.AddField(output_points_fc, "near_park", "SHORT")
+
+    # Parse and validate group fields
+    group_fields = [f.strip() for f in group_fields_raw.split(";") if f.strip()] if group_fields_raw else []
+    existing_fields = [f.name for f in arcpy.ListFields(output_points_fc)]
+    valid_group_fields = [f for f in group_fields if f in existing_fields]
+    has_population_field = population_field in existing_fields
+    use_population_data = bool(valid_group_fields or has_population_field)
+
+    # Define which fields to use in cursor based on data availability
+    if use_population_data:
+        if valid_group_fields:
+            fields = valid_group_fields + ["near_park"]
+            arcpy.AddMessage(f"→ Using age group fields: {', '.join(valid_group_fields)}")
+        else:
+            fields = [population_field, "near_park"]
+            arcpy.AddMessage(f"→ Using population field: {population_field}")
+    else:
+        fields = ["near_park"]
+        arcpy.AddMessage("→ No population data found – switching to entrance count mode.")
+
+    #------------------------------------
+    # Mark address points that are within accessible area
+    #------------------------------------
+    arcpy.management.SelectLayerByLocation("output_layer_temp", "WITHIN", accessibility_fc, selection_type="NEW_SELECTION")
+    arcpy.management.CalculateField("output_layer_temp", "near_park", 1, "PYTHON3")
+    arcpy.management.SelectLayerByAttribute("output_layer_temp", "CLEAR_SELECTION")
+
+    #------------------------------------
+    # Prepare output district layer
+    #------------------------------------
+    arcpy.management.CopyFeatures(districts_fc, output_districts_fc)
+    arcpy.management.MakeFeatureLayer(output_districts_fc, "district_layer")
+
+    if "near_park_district" not in [f.name for f in arcpy.ListFields(output_districts_fc)]:
+        arcpy.management.AddField(output_districts_fc, "near_park_district", "SHORT")
+
+    #------------------------------------
+    # Initialize accumulators
+    #------------------------------------
+    area_pcts = []
+    district_names = []
+    txt_lines = []
+    csv_lines = ["District,Entrances,AreaCoveredPct"]
+    total_entrances_all = 0
+
+    #------------------------------------
+    # Process each district
+    #------------------------------------
+    with arcpy.da.UpdateCursor(output_districts_fc, [district_field, "SHAPE@", "near_park_district", "Shape_Area"]) as cursor:
+        for name, geom, flag, district_area in cursor:
+            arcpy.management.SelectLayerByLocation("output_layer_temp", "WITHIN", geom, selection_type="NEW_SELECTION")
+
+            count_total = 0
+            count_accessible = 0
+            group_totals = {f: 0 for f in valid_group_fields}
+            group_accesses = {f: 0 for f in valid_group_fields}
+
+            # Read all address points in the district
+            with arcpy.da.SearchCursor("output_layer_temp", fields) as p_cursor:
+                for row in p_cursor:
+                    if use_population_data:
+                        if valid_group_fields:
+                            for i, f in enumerate(valid_group_fields):
+                                group_totals[f] += row[i]
+                                if row[-1] == 1:
+                                    group_accesses[f] += row[i]
+                            count_total += sum(row[:len(valid_group_fields)])
+                            if row[-1] == 1:
+                                count_accessible += sum(row[:len(valid_group_fields)])
+                        else:
+                            count_total += row[0]
+                            if row[1] == 1:
+                                count_accessible += row[0]
+                    else:
+                        count_total += 1
+                        if row[0] == 1:
+                            count_accessible += 1
+
+            total_entrances_all += count_total
+
+            # Calculate accessible area in district
+            arcpy.analysis.Clip(accessibility_fc, geom, access_area_clip)
+            accessible_geom_area = sum(row[0] for row in arcpy.da.SearchCursor(access_area_clip, ["SHAPE@AREA"]))
+            area_pct = round((accessible_geom_area / district_area) * 100, 2) if district_area > 0 else 0
+
+            area_pcts.append(area_pct)
+            district_names.append(name)
+
+            # Log and export per district
+            if valid_group_fields:
+                header_msg = f"{name:<20} total: {int(count_total)}   with access: {int(count_accessible)}   ({area_pct:.2f}% area covered)"
+                arcpy.AddMessage(header_msg)
+                txt_lines.append(header_msg)
+                for f in valid_group_fields:
+                    label = f.replace("sum_", "Age ").replace("_", "-").replace("65-", "65+")
+                    total = group_totals[f]
+                    access = group_accesses[f]
+                    pct = round(access / total * 100, 2) if total > 0 else 0.0
+                    line = f"  - {label:<10}: {access} / {total}   | {pct:.2f}%"
+                    arcpy.AddMessage(line)
+                    txt_lines.append(line)
+            else:
+                if has_population_field:
+                    msg = f"{name:<20} population: {int(count_total):<6} | area covered: {area_pct:>5.2f}%"
+                else:
+                    msg = f"{name:<20} entrances:  {int(count_total):<6} | area covered: {area_pct:>5.2f}%"
+                arcpy.AddMessage(msg)
+                txt_lines.append(msg)
+
+            csv_lines.append(f"{name},{count_total},{area_pct}")
+            cursor.updateRow((name, geom, 1 if count_accessible > 0 else 0, district_area))
+
+    #------------------------------------
+    # Summary statistics
+    #------------------------------------
+    arcpy.AddMessage("")
+    arcpy.AddMessage("DISTRICT AREA COVERAGE SUMMARY")
+    arcpy.AddMessage("-" * 80)
+
+    if area_pcts:
+        max_area = max(area_pcts)
+        min_area = min(area_pcts)
+        avg_area = round(sum(area_pcts) / len(area_pcts), 2)
+        best_name = district_names[area_pcts.index(max_area)]
+        worst_name = district_names[area_pcts.index(min_area)]
+
+        arcpy.AddMessage(f"→ Best coverage:    {max_area}% ({best_name})")
+        arcpy.AddMessage(f"→ Worst coverage:   {min_area}% ({worst_name})")
+        arcpy.AddMessage(f"→ Average coverage: {avg_area}%")
+
+        if has_population_field:
+            arcpy.AddMessage(f"→ Total population: {total_entrances_all}")
+        else:
+            arcpy.AddMessage(f"→ Total entrances:  {total_entrances_all}")
+
+        txt_lines.append("")
+        txt_lines.append("COVERAGE SUMMARY")
+        txt_lines.append(f"Best:   {best_name} ({max_area}%)")
+        txt_lines.append(f"Worst:  {worst_name} ({min_area}%)")
+        txt_lines.append(f"Average: {avg_area}%")
+
+        if has_population_field:
+            txt_lines.append(f"Total population: {total_entrances_all}")
+        else:
+            txt_lines.append(f"Total entrances: {total_entrances_all}")
+    else:
+        arcpy.AddMessage("→ No area data available.")
+
+    #------------------------------------
+    # Save results to TXT and CSV
+    #------------------------------------
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    txt_path = os.path.join(output_folder, f"accessibility_summary_{suffix}_{timestamp}.txt")
+    csv_path = os.path.join(output_folder, f"accessibility_summary_{suffix}_{timestamp}.csv")
+
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(txt_lines))
+    with open(csv_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(csv_lines))
+
+    arcpy.AddMessage("")
+    arcpy.AddMessage("Exported summary:")
+    arcpy.AddMessage(f"→ TXT:  {txt_path}")
+    arcpy.AddMessage(f"→ CSV:  {csv_path}")
+    arcpy.AddMessage("===================================================")
+    arcpy.AddMessage("===      PARK ACCESSIBILITY ANALYSIS DONE       ===")
     arcpy.AddMessage("===================================================")
     arcpy.AddMessage("")
 
-    del input_roads, output_path
-    del network_dataset
-    # Clean up
+#------------------------------------
+# Script entry point
+#------------------------------------
+def main():
+    accessibility_fc   = arcpy.GetParameterAsText(0)
+    districts_fc       = arcpy.GetParameterAsText(1)
+    district_field     = arcpy.GetParameterAsText(2)
+    input_fc           = arcpy.GetParameterAsText(3)
+    population_field   = arcpy.GetParameterAsText(4)
+    group_fields_raw   = arcpy.GetParameterAsText(5)
+    output_gdb         = arcpy.GetParameterAsText(6)
+    distance_label     = arcpy.GetParameterAsText(7)
+
+    analyze_accessibility(accessibility_fc, input_fc, population_field,
+                          group_fields_raw, output_gdb, distance_label,
+                          districts_fc, district_field)
+
+    del accessibility_fc, input_fc, population_field, group_fields_raw
+    del output_gdb, distance_label, districts_fc, district_field
+
+if __name__ == "__main__":
+    main()

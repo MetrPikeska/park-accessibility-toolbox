@@ -10,17 +10,23 @@ import arcpy
 import os
 from datetime import datetime
 
+#------------------------------------
+# Main analysis function
+#------------------------------------
 def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fields_raw,
                           output_gdb, distance_label, districts_fc, district_field):
     arcpy.env.overwriteOutput = True
+    # Allow overwriting outputs
 
     distance_label = str(distance_label)
     suffix = f"{distance_label}m"
+    # Prepare suffix for filenames
 
     output_points_fc = os.path.join(output_gdb, f"points_accessibility_{suffix}")
     output_districts_fc = os.path.join(output_gdb, f"districts_accessibility_{suffix}")
     access_area_clip = os.path.join("in_memory", f"access_area_clip_{suffix}")
     output_folder = os.path.dirname(output_gdb)
+    # Define output paths
 
     arcpy.AddMessage("")
     arcpy.AddMessage("===================================================")
@@ -30,6 +36,9 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
     arcpy.AddMessage(f"Methodology: A short walk to the park – {distance_label} meters to green space")
     arcpy.AddMessage("---------------------------------------------------")
 
+    #------------------------------------
+    # Validate input data
+    #------------------------------------
     for fc in [accessibility_fc, input_fc, districts_fc]:
         if not arcpy.Exists(fc):
             arcpy.AddError(f"ERROR: Input layer '{fc}' does not exist.")
@@ -38,13 +47,18 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
         arcpy.AddError("ERROR: Output geodatabase not set.")
         return
 
+    #------------------------------------
+    # Prepare input layers
+    #------------------------------------
     arcpy.management.MakeFeatureLayer(input_fc, "input_layer_temp")
     arcpy.management.CopyFeatures("input_layer_temp", output_points_fc)
     arcpy.management.MakeFeatureLayer(output_points_fc, "output_layer_temp")
 
     if "near_park" not in [f.name for f in arcpy.ListFields(output_points_fc)]:
         arcpy.management.AddField(output_points_fc, "near_park", "SHORT")
+    # Add field for accessibility
 
+    # Parse group fields
     group_fields = [f.strip() for f in group_fields_raw.split(";") if f.strip()] if group_fields_raw else []
     existing_fields = [f.name for f in arcpy.ListFields(output_points_fc)]
     valid_group_fields = [f for f in group_fields if f in existing_fields]
@@ -62,22 +76,30 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
         fields = ["near_park"]
         arcpy.AddMessage("→ No population data found – switching to entrance count mode.")
 
+    # Mark points within accessibility polygon
     arcpy.management.SelectLayerByLocation("output_layer_temp", "WITHIN", accessibility_fc, selection_type="NEW_SELECTION")
     arcpy.management.CalculateField("output_layer_temp", "near_park", 1, "PYTHON3")
     arcpy.management.SelectLayerByAttribute("output_layer_temp", "CLEAR_SELECTION")
 
+    # Prepare district layer
     arcpy.management.CopyFeatures(districts_fc, output_districts_fc)
     arcpy.management.MakeFeatureLayer(output_districts_fc, "district_layer")
 
     if "near_park_district" not in [f.name for f in arcpy.ListFields(output_districts_fc)]:
         arcpy.management.AddField(output_districts_fc, "near_park_district", "SHORT")
 
+    #------------------------------------
+    # Initialize statistics
+    #------------------------------------
     area_pcts = []
     district_names = []
     txt_lines = []
     csv_lines = ["District,Entrances,AreaCoveredPct"]
     total_entrances_all = 0
 
+    #------------------------------------
+    # Process each district
+    #------------------------------------
     with arcpy.da.UpdateCursor(output_districts_fc, [district_field, "SHAPE@", "near_park_district", "Shape_Area"]) as cursor:
         for name, geom, flag, district_area in cursor:
             arcpy.management.SelectLayerByLocation("output_layer_temp", "WITHIN", geom, selection_type="NEW_SELECTION")
@@ -116,6 +138,7 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
             area_pcts.append(area_pct)
             district_names.append(name)
 
+            # Output per district
             if valid_group_fields:
                 header_msg = f"{name:<20} total: {int(count_total)}   with access: {int(count_accessible)}   ({area_pct:.2f}% area covered)"
                 arcpy.AddMessage(header_msg)
@@ -139,6 +162,9 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
             csv_lines.append(f"{name},{count_total},{area_pct}")
             cursor.updateRow((name, geom, 1 if count_accessible > 0 else 0, district_area))
 
+    #------------------------------------
+    # Summary outputs
+    #------------------------------------
     arcpy.AddMessage("")
     arcpy.AddMessage("DISTRICT AREA COVERAGE SUMMARY")
     arcpy.AddMessage("-" * 80)
@@ -172,6 +198,9 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
     else:
         arcpy.AddMessage("→ No area data available.")
 
+    #------------------------------------
+    # Save TXT and CSV outputs
+    #------------------------------------
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     txt_path = os.path.join(output_folder, f"accessibility_summary_{suffix}_{timestamp}.txt")
     csv_path = os.path.join(output_folder, f"accessibility_summary_{suffix}_{timestamp}.csv")
@@ -190,6 +219,9 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
     arcpy.AddMessage("===================================================")
     arcpy.AddMessage("")
 
+#------------------------------------
+# Script entry point
+#------------------------------------
 def main():
     accessibility_fc   = arcpy.GetParameterAsText(0)
     districts_fc       = arcpy.GetParameterAsText(1)
