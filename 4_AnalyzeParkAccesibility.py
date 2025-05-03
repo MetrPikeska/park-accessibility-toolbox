@@ -77,9 +77,11 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
         arcpy.AddMessage("→ No population data found – switching to entrance count mode.")
 
     # Mark points within accessibility polygon
-    arcpy.management.SelectLayerByLocation("output_layer_temp", "WITHIN", accessibility_fc, selection_type="NEW_SELECTION")
+    arcpy.management.SelectLayerByLocation("output_layer_temp", "WITHIN",
+                                       accessibility_fc, selection_type="NEW_SELECTION")
     arcpy.management.CalculateField("output_layer_temp", "near_park", 1, "PYTHON3")
     arcpy.management.SelectLayerByAttribute("output_layer_temp", "CLEAR_SELECTION")
+
 
     # Prepare district layer
     arcpy.management.CopyFeatures(districts_fc, output_districts_fc)

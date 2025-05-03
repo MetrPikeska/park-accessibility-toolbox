@@ -85,20 +85,24 @@ def generate_analysis_points(parks_layer, streets_layer, output_gdb, include_sma
         total_points = int(arcpy.management.GetCount(points)[0])
         arcpy.AddMessage(f"   Total points generated:   {total_points:,}")
 
+        # CREATE FEATURE LAYER FOR SPATIAL SELECTION
+        points_layer = f"points_lyr_{output_name}"
+        arcpy.management.MakeFeatureLayer(points, points_layer)
+
         arcpy.management.SelectLayerByLocation(
-            in_layer=points,
+            in_layer=points_layer,
             overlap_type="WITHIN_A_DISTANCE",
             select_features=streets_layer,
-            search_distance=25,
+            search_distance="25 Meters",
             selection_type="NEW_SELECTION"
         )
         # Select only points within 25 meters from roads
 
-        near_street_count = int(arcpy.management.GetCount(points)[0])
+        near_street_count = int(arcpy.management.GetCount(points_layer)[0])
         arcpy.AddMessage(f"   Points near streets:      {near_street_count:,}")
 
         output_path = os.path.join(output_gdb, output_name)
-        arcpy.management.CopyFeatures(points, output_path)
+        arcpy.management.CopyFeatures(points_layer, output_path)
         # Export final result
 
         arcpy.AddMessage(f"   Output saved to:          {output_path}")

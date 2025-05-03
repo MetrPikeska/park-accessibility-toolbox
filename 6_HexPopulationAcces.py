@@ -1,44 +1,37 @@
 #------------------------------------
 # Name: 6_HexPopulationAcces.py
 # Author: Petr MIKESKA, Department of Geoinformatics, Faculty of Science, Palacký University Olomouc, 2025
-# Bachelor thesis title (EN): Assessing the availability of green spaces and parks for urban residents
-# Bachelor thesis title (CZ): Hodnocení dostupnosti zelených ploch a parků pro obyvatele měst
-# This script calculates population statistics for each hexagon, including total and accessible population,
-# and number of entry points with or without access to urban green areas.
+# Modified by: Vojtěch Svoboda, 2025
+# This script calculates statistics for each hexagon based on address points,
+# either summing population or counting address points if no population field is specified.
 #------------------------------------
 
 import arcpy
 import sys
 
-# General settings
 arcpy.env.overwriteOutput = True
 
-#------------------------------------
-# Log basic info
-#------------------------------------
 # Input parameters
-hex_layer           = arcpy.GetParameterAsText(0)    # Hexagon feature class
-pop_points_input    = arcpy.GetParameterAsText(1)    # Address points
-access_polygon      = arcpy.GetParameterAsText(2)    # Accessibility polygon
-pop_field           = arcpy.GetParameterAsText(3)    # Field with population count (can be empty)
-output_hex_layer    = arcpy.GetParameterAsText(4)    # Output feature class
+hex_layer           = arcpy.GetParameterAsText(0)
+pop_points_input    = arcpy.GetParameterAsText(1)
+access_polygon      = arcpy.GetParameterAsText(2)
+pop_field           = arcpy.GetParameterAsText(3)
+output_hex_layer    = arcpy.GetParameterAsText(4)
 
-# Temporary data paths
-points_single       = "in_memory\\points_single"             # Flattened points if input is multipoint
-points_flagged      = "in_memory\\points_with_access"        # Points with has_access field
-hex_copy            = "in_memory\\hex_copy"                  # Copy of hex grid to store stats
+# Temporary paths
+points_single       = "in_memory\\points_single"
+points_flagged      = "in_memory\\points_with_access"
+hex_copy            = "in_memory\\hex_copy"
 
-#------------------------------------
-# Prepare input data
-#------------------------------------
+# Logging
 arcpy.AddMessage("")
 arcpy.AddMessage("===================================================")
 arcpy.AddMessage("===     ACCESSIBILITY POINT GENERATION START    ===")
 arcpy.AddMessage("===================================================")
-arcpy.AddMessage("Author: Petr Mikeska (Bachelor's thesis)")
+arcpy.AddMessage("Author: Petr Mikeska ")
 arcpy.AddMessage("---------------------------------------------------")
 
-# Convert Multipoint to Singlepoint if needed
+# Convert multipoints to single if needed
 desc = arcpy.Describe(pop_points_input)
 if desc.shapeType == "Multipoint":
     arcpy.AddMessage("Converting Multipoint to Singlepoint...")
@@ -46,7 +39,7 @@ if desc.shapeType == "Multipoint":
 else:
     arcpy.CopyFeatures_management(pop_points_input, points_single)
 
-# Join address points with accessibility polygon
+# Spatial join: address points + accessibility polygon
 arcpy.AddMessage("Joining address points to accessibility polygon...")
 arcpy.analysis.SpatialJoin(
     target_features=points_single,
@@ -57,14 +50,14 @@ arcpy.analysis.SpatialJoin(
     match_option="INTERSECT"
 )
 
-# Flag accessible points
+# Add binary access flag
 arcpy.AddField_management(points_flagged, "has_access", "SHORT")
 with arcpy.da.UpdateCursor(points_flagged, ["Join_Count", "has_access"]) as cursor:
     for row in cursor:
         row[1] = 1 if row[0] and row[0] > 0 else 0
         cursor.updateRow(row)
 
-# Copy hex layer and prepare fields
+# Prepare hexagon grid
 arcpy.CopyFeatures_management(hex_layer, hex_copy)
 fields = [f.name for f in arcpy.ListFields(hex_copy)]
 needed_fields = {
@@ -78,12 +71,9 @@ for f, typ in needed_fields.items():
     if f not in fields:
         arcpy.AddField_management(hex_copy, f, typ)
 
-# Make selectable layer from address points
 arcpy.MakeFeatureLayer_management(points_flagged, "points_lyr")
 
-#------------------------------------
-# Loop over hexagons and calculate statistics
-#------------------------------------
+# Main loop per hexagon
 arcpy.AddMessage("Processing hexagons...")
 with arcpy.da.UpdateCursor(hex_copy, [
     "OBJECTID", "SHAPE@",
@@ -91,37 +81,42 @@ with arcpy.da.UpdateCursor(hex_copy, [
     "points_with_access", "points_without_access"
 ]) as cursor:
     for row in cursor:
-        oid        = row[0]
-        geom       = row[1]
-
-        # Select points inside the current hexagon
+        geom = row[1]
         arcpy.SelectLayerByLocation_management("points_lyr", "WITHIN", geom, selection_type="NEW_SELECTION")
 
-        total_pop      = 0
-        access_pop     = 0
-        count_with     = 0
-        count_without  = 0
+        total_pop = 0
+        access_pop = 0
+        count_with = 0
+        count_without = 0
 
-        fields_to_read = ["has_access", pop_field] if pop_field else ["has_access"]
-        with arcpy.da.SearchCursor("points_lyr", fields_to_read) as point_cursor:
-            for point_row in point_cursor:
-                has_access = point_row[0]
-                value = 1 if not pop_field else point_row[1]
-                try:
-                    value = float(value)
-                except:
-                    continue
-
-                total_pop += value
-                if has_access == 1:
-                    access_pop += value
-                    count_with += 1
-                else:
-                    count_without += 1
+        if pop_field:
+            fields_to_read = ["has_access", pop_field]
+            with arcpy.da.SearchCursor("points_lyr", fields_to_read) as point_cursor:
+                for point_row in point_cursor:
+                    has_access, value = point_row
+                    try:
+                        value = float(value)
+                    except:
+                        continue
+                    total_pop += value
+                    if has_access == 1:
+                        access_pop += value
+                        count_with += 1
+                    else:
+                        count_without += 1
+        else:
+            with arcpy.da.SearchCursor("points_lyr", ["has_access"]) as point_cursor:
+                for point_row in point_cursor:
+                    has_access = point_row[0]
+                    total_pop += 1
+                    if has_access == 1:
+                        access_pop += 1
+                        count_with += 1
+                    else:
+                        count_without += 1
 
         ratio = (access_pop / total_pop) * 100 if total_pop > 0 else 0
 
-        # Write statistics back to hexagon
         row[2] = total_pop
         row[3] = access_pop
         row[4] = ratio
@@ -129,9 +124,7 @@ with arcpy.da.UpdateCursor(hex_copy, [
         row[6] = count_without
         cursor.updateRow(row)
 
-#------------------------------------
-# Save results and cleanup
-#------------------------------------
+# Final output and cleanup
 arcpy.AddMessage("Saving output...")
 arcpy.CopyFeatures_management(hex_copy, output_hex_layer)
 
@@ -142,8 +135,5 @@ arcpy.Delete_management("points_lyr")
 
 arcpy.AddMessage(f"✔ Done! Output saved to: {output_hex_layer}")
 
-#------------------------------------
-# Delete variables
-#------------------------------------
 del hex_layer, pop_points_input, access_polygon, pop_field, output_hex_layer
 del points_single, points_flagged, hex_copy, fields, needed_fields
