@@ -9,37 +9,17 @@
 import arcpy
 import os
 
-#------------------------------------
-# Check and activate Network Analyst extension
-#------------------------------------
-if arcpy.CheckExtension("Network") == "Available":
-    arcpy.CheckOutExtension("Network")
-    # Activate Network Analyst
-    arcpy.AddMessage("✔ Network Analyst extension checked out.")
-else:
-    arcpy.AddError("❌ Network Analyst extension is not available.")
-    raise SystemExit()
-
-#------------------------------------
 # Input parameters
-#------------------------------------
-gdb_path             = arcpy.GetParameterAsText(0)
-# Path to File Geodatabase
-network_dataset      = os.path.join(gdb_path, "NetworkData", "NetworkDataset")
-# Full path to network dataset
-facilities_layer     = arcpy.GetParameterAsText(1)
-# Access points layer (facilities)
-output_service_area  = arcpy.GetParameterAsText(2)
-# Output polygon layer path
-travel_distance      = arcpy.GetParameterAsText(3)
-# Travel distance in meters
+gdb_path             = arcpy.GetParameterAsText(0)                                                       # Path to File Geodatabase
+network_dataset      = os.path.join(gdb_path, "NetworkData", "NetworkDataset")                           # Path to Network Dataset
+facilities_layer     = arcpy.GetParameterAsText(1)                                                       # Park access points
+output_service_area  = arcpy.GetParameterAsText(2)                                                       # Output polygon feature class
+travel_distance      = arcpy.GetParameterAsText(3)                                                       # Travel distance in meters
 
+# General settings
 arcpy.env.overwriteOutput = True
-# Allow overwriting outputs
 
-#------------------------------------
-# Print header
-#------------------------------------
+# Log basic info
 arcpy.AddMessage("")
 arcpy.AddMessage("===================================================")
 arcpy.AddMessage("===           SERVICE AREA ANALYSIS START       ===")
@@ -53,9 +33,7 @@ arcpy.AddMessage(f"Output service area:  {output_service_area}")
 arcpy.AddMessage(f"Travel distance:      {travel_distance} meters")
 arcpy.AddMessage("---------------------------------------------------")
 
-#------------------------------------
-# Validate existence of inputs
-#------------------------------------
+# Validate existence of input layers
 arcpy.AddMessage("Checking input data...")
 if not arcpy.Exists(network_dataset):
     arcpy.AddError("Network dataset does not exist.")
@@ -63,11 +41,9 @@ if not arcpy.Exists(network_dataset):
 if not arcpy.Exists(facilities_layer):
     arcpy.AddError("Facilities layer does not exist.")
     raise SystemExit()
-arcpy.AddMessage("✔ Input data check passed.")
+arcpy.AddMessage("Input data check passed.")
 
-#------------------------------------
-# Create service area layer
-#------------------------------------
+# Create service area analysis layer
 arcpy.AddMessage("Creating service area layer...")
 service_area_layer = "Service_Area_Output"
 arcpy.na.MakeServiceAreaLayer(
@@ -80,92 +56,52 @@ arcpy.na.MakeServiceAreaLayer(
     merge                       = "NO_MERGE",
     nesting_type                = "RINGS"
 )
-# Create service area layer
-arcpy.AddMessage("✔ Service area layer created.")
+arcpy.AddMessage("Service area layer created.")
 
-#------------------------------------
 # Add facilities to the analysis
-#------------------------------------
 arcpy.AddMessage("Adding facilities to the analysis...")
-facility_count = int(arcpy.management.GetCount(facilities_layer)[0])
-arcpy.AddMessage(f"   → Number of input facilities: {facility_count}")
+facility_count = int(arcpy.GetCount_management(facilities_layer)[0])
+arcpy.AddMessage(f"   Number of input facilities: {facility_count}")
 arcpy.na.AddLocations(service_area_layer, "Facilities", facilities_layer)
-# Add access points to service area layer
-arcpy.AddMessage("✔ Facilities successfully added.")
+arcpy.AddMessage("Facilities successfully added.")
 
-#------------------------------------
-# Solve the network analysis
-#------------------------------------
+# Run network analysis
 arcpy.AddMessage("Solving network analysis...")
 arcpy.na.Solve(service_area_layer)
-# Solve the network service area
-arcpy.AddMessage("✔ Network analysis completed.")
+arcpy.AddMessage("Network analysis completed.")
 
-#------------------------------------
 # Export resulting polygons
-#------------------------------------
 arcpy.AddMessage("Exporting service area polygons...")
 temp_polygons = os.path.join(gdb_path, "temp_service_area")
-arcpy.management.CopyFeatures(service_area_layer + "\\Polygons", temp_polygons)
-# Export polygons to temporary feature class
-arcpy.AddMessage(f"✔ Temporary polygons saved: {temp_polygons}")
+arcpy.CopyFeatures_management(service_area_layer + "\\Polygons", temp_polygons)
+arcpy.AddMessage(f"Temporary polygons saved to: {temp_polygons}")
 
-#------------------------------------
-# Dissolve polygons into one
-#------------------------------------
-polygon_count = int(arcpy.management.GetCount(temp_polygons)[0])
-arcpy.AddMessage(f"   → Number of polygons created: {polygon_count}")
+# Dissolve polygons into one output
+polygon_count = int(arcpy.GetCount_management(temp_polygons)[0])
+arcpy.AddMessage(f"   Number of polygons created: {polygon_count}")
 if polygon_count == 0:
-    arcpy.AddWarning("⚠ No polygons were created. The analysis may have failed.")
+    arcpy.AddWarning("No polygons were created. Analysis may have failed.")
 
 arcpy.AddMessage("Dissolving polygons into single output...")
-arcpy.management.Dissolve(temp_polygons, output_service_area)
-# Dissolve all polygons into one final shape
-arcpy.AddMessage(f"✔ Final dissolved output saved to: {output_service_area}")
+arcpy.Dissolve_management(temp_polygons, output_service_area)
+arcpy.AddMessage(f"Final dissolved output saved to: {output_service_area}")
 
-#------------------------------------
-# Add travel distance attribute to output polygon
-#------------------------------------
-arcpy.AddMessage("Adding travel distance attribute to output polygon...")
-field_name = "distance_m"
-
-fields = [f.name for f in arcpy.ListFields(output_service_area)]
-if field_name not in fields:
-    arcpy.management.AddField(output_service_area, field_name, "DOUBLE")
-    arcpy.AddMessage(f"✔ Field '{field_name}' created.")
-else:
-    arcpy.AddMessage(f"✔ Field '{field_name}' already exists.")
-
-with arcpy.da.UpdateCursor(output_service_area, [field_name]) as cursor:
-    for row in cursor:
-        row[0] = float(travel_distance)
-        cursor.updateRow(row)
-
-arcpy.AddMessage(f"✔ Travel distance ({travel_distance} meters) written to field '{field_name}'.")
-
-#------------------------------------
-# Final checks and cleanup
-#------------------------------------
-final_count = int(arcpy.management.GetCount(output_service_area)[0])
-arcpy.AddMessage(f"   → Final polygon count: {final_count}")
+# Check result and cleanup
+final_count = int(arcpy.GetCount_management(output_service_area)[0])
+arcpy.AddMessage(f"   Final polygon count: {final_count}")
 if final_count != 1:
-    arcpy.AddWarning("⚠ Final result does not contain exactly one polygon.")
+    arcpy.AddWarning("Final result does not contain exactly one polygon.")
 
 arcpy.AddMessage("Cleaning up temporary data...")
-arcpy.management.Delete(temp_polygons)
-# Remove temporary data
-arcpy.AddMessage("✔ Temporary data deleted.")
+arcpy.Delete_management(temp_polygons)
+arcpy.AddMessage("Temporary data deleted.")
 
-#------------------------------------
 # Final log
-#------------------------------------
 arcpy.AddMessage("===================================================")
 arcpy.AddMessage("===           SERVICE AREA ANALYSIS DONE        ===")
 arcpy.AddMessage("===================================================")
 arcpy.AddMessage("")
 
-#------------------------------------
 # Delete variables
-#------------------------------------
 del gdb_path, network_dataset, facilities_layer, output_service_area, travel_distance
-# Clean up variables
+del service_area_layer, facility_count, temp_polygons, polygon_count, final_count
