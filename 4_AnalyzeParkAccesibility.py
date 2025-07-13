@@ -10,6 +10,7 @@ from datetime import datetime
 # This script analyzes accessibility of green space within a defined walking distance for each city district.
 #------------------------------------
 
+
 #------------------------------------
 # Main analysis function
 #------------------------------------
@@ -34,6 +35,21 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
     arcpy.AddMessage("Author: Petr Mikeska (Bachelor's thesis)")
     arcpy.AddMessage(f"Methodology: A short walk to the park – {distance_label} meters to green space")
     arcpy.AddMessage("---------------------------------------------------")
+
+    #------------------------------------
+    # Log all input parameters
+    #------------------------------------
+    arcpy.AddMessage("INPUT PARAMETERS")
+    arcpy.AddMessage(f"  - accessibility_fc: {accessibility_fc}")
+    arcpy.AddMessage(f"  - input_fc:         {input_fc}")
+    arcpy.AddMessage(f"  - population_field: {population_field}")
+    arcpy.AddMessage(f"  - group_fields_raw: {group_fields_raw}")
+    arcpy.AddMessage(f"  - output_gdb:       {output_gdb}")
+    arcpy.AddMessage(f"  - distance_label:   {distance_label}")
+    arcpy.AddMessage(f"  - districts_fc:     {districts_fc}")
+    arcpy.AddMessage(f"  - district_field:   {district_field}")
+    arcpy.AddMessage("---------------------------------------------------")
+
 
     #------------------------------------
     # Validate input data
