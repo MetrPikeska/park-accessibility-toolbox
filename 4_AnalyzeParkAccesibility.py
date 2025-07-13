@@ -1,3 +1,7 @@
+import arcpy
+import os
+from datetime import datetime
+
 #------------------------------------
 # Name: 4_AnalyzeParkAccessibility.py
 # Author: Petr MIKESKA, Department of Geoinformatics, Faculty of Science, Palacký University Olomouc, 2025
@@ -6,27 +10,22 @@
 # This script analyzes accessibility of green space within a defined walking distance for each city district.
 #------------------------------------
 
-import arcpy
-import os
-from datetime import datetime
-
 #------------------------------------
 # Main analysis function
 #------------------------------------
 def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fields_raw,
                           output_gdb, distance_label, districts_fc, district_field):
-    arcpy.env.overwriteOutput = True
-    # Allow overwriting outputs
+    arcpy.env.overwriteOutput = True  # Allow overwriting outputs
 
+    # Prepare naming suffix
     distance_label = str(distance_label)
     suffix = f"{distance_label}m"
-    # Prepare suffix for filenames
 
+    # Define output feature class paths
     output_points_fc = os.path.join(output_gdb, f"points_accessibility_{suffix}")
     output_districts_fc = os.path.join(output_gdb, f"districts_accessibility_{suffix}")
     access_area_clip = os.path.join("in_memory", f"access_area_clip_{suffix}")
     output_folder = os.path.dirname(output_gdb)
-    # Define output paths
 
     arcpy.AddMessage("")
     arcpy.AddMessage("===================================================")
@@ -81,7 +80,6 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
                                        accessibility_fc, selection_type="NEW_SELECTION")
     arcpy.management.CalculateField("output_layer_temp", "near_park", 1, "PYTHON3")
     arcpy.management.SelectLayerByAttribute("output_layer_temp", "CLEAR_SELECTION")
-
 
     # Prepare district layer
     arcpy.management.CopyFeatures(districts_fc, output_districts_fc)
@@ -167,9 +165,8 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
     #------------------------------------
     # Summary outputs
     #------------------------------------
-    arcpy.AddMessage("")
-    arcpy.AddMessage("DISTRICT AREA COVERAGE SUMMARY")
-    arcpy.AddMessage("-" * 80)
+    arcpy.AddMessage("\nDISTRICT AREA COVERAGE SUMMARY")
+    arcpy.AddMessage("" + "-" * 80)
 
     if area_pcts:
         max_area = max(area_pcts)
@@ -187,12 +184,11 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
         else:
             arcpy.AddMessage(f"→ Total entrances:  {total_entrances_all}")
 
-        txt_lines.append("")
-        txt_lines.append("COVERAGE SUMMARY")
-        txt_lines.append(f"Best:   {best_name} ({max_area}%)")
-        txt_lines.append(f"Worst:  {worst_name} ({min_area}%)")
-        txt_lines.append(f"Average: {avg_area}%")
-
+        txt_lines.extend(["", "COVERAGE SUMMARY",
+                           f"Best:   {best_name} ({max_area}%)",
+                           f"Worst:  {worst_name} ({min_area}%)",
+                           f"Average: {avg_area}%"]
+        )
         if has_population_field:
             txt_lines.append(f"Total population: {total_entrances_all}")
         else:
@@ -212,14 +208,12 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
     with open(csv_path, "w", encoding="utf-8") as f:
         f.write("\n".join(csv_lines))
 
-    arcpy.AddMessage("")
-    arcpy.AddMessage("Exported summary:")
+    arcpy.AddMessage("\nExported summary:")
     arcpy.AddMessage(f"→ TXT:  {txt_path}")
     arcpy.AddMessage(f"→ CSV:  {csv_path}")
     arcpy.AddMessage("===================================================")
     arcpy.AddMessage("===      PARK ACCESSIBILITY ANALYSIS DONE       ===")
     arcpy.AddMessage("===================================================")
-    arcpy.AddMessage("")
 
 #------------------------------------
 # Script entry point
