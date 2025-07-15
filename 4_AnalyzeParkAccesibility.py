@@ -11,7 +11,6 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
                           output_gdb, distance_label, districts_fc, district_field):
     arcpy.env.overwriteOutput = True
 
-    # Prepare suffix
     suffix = f"{distance_label}m"
     output_points_fc = os.path.join(output_gdb, f"points_accessibility_{suffix}")
     output_districts_fc = os.path.join(output_gdb, f"districts_accessibility_{suffix}")
@@ -20,11 +19,11 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
 
     # Header
     arcpy.AddMessage("")
-    arcpy.AddMessage("===================================================")
+    arcpy.AddMessage("=" * 60)
     arcpy.AddMessage("===      PARK ACCESSIBILITY ANALYSIS START      ===")
-    arcpy.AddMessage("===================================================")
+    arcpy.AddMessage("=" * 60)
     arcpy.AddMessage(f"Walking distance threshold: {distance_label} m")
-    arcpy.AddMessage("---------------------------------------------------")
+    arcpy.AddMessage("-" * 60)
 
     # Validate inputs
     for fc in [accessibility_fc, input_fc, districts_fc]:
@@ -51,6 +50,27 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
     has_population_field = population_field in existing_fields
     use_population_data = bool(valid_group_fields or has_population_field)
 
+    # Dynamická terminologie a legenda
+    if has_population_field or valid_group_fields:
+        total_label = "Total population"
+        accessible_label = "Accessible"
+        csv_header = "District,PopulationAccessible,AreaCoveredPercent"
+        legend_lines = [
+            "- Total population = all people in district (if population data available)",
+            "- Accessible = number of people within walking distance",
+            "- Area covered = % of district area within walking distance"
+        ]
+    else:
+        total_label = "Total points"
+        accessible_label = "Accessible"
+        csv_header = "District,PointsAccessible,AreaCoveredPercent"
+        legend_lines = [
+            "- Total points = all address locations in district (if no population data)",
+            "- Accessible = number of address points within walking distance",
+            "- Area covered = % of district area within walking distance"
+        ]
+
+    # Decide fields for analysis
     if use_population_data:
         if valid_group_fields:
             fields = valid_group_fields + ["near_park"]
@@ -60,7 +80,14 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
             arcpy.AddMessage(f"→ Using population field: {population_field}")
     else:
         fields = ["near_park"]
-        arcpy.AddMessage("→ No population data found – counting entrances only.")
+        arcpy.AddMessage("→ No population data found – counting address points.")
+
+    # === LEGEND AT START ===
+    arcpy.AddMessage("")
+    arcpy.AddMessage("Legend:")
+    for line in legend_lines:
+        arcpy.AddMessage(line)
+    arcpy.AddMessage("-" * 60)
 
     # Mark points within accessibility polygon
     arcpy.management.SelectLayerByLocation("output_layer_temp", "WITHIN", accessibility_fc, selection_type="NEW_SELECTION")
@@ -76,7 +103,17 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
     # Stats containers
     area_pcts, district_names = [], []
     txt_lines = []
-    csv_lines = ["District,Entrances,AreaCoveredPct"]
+
+    # HEADER FOR TXT
+    txt_lines.append("PARK ACCESSIBILITY ANALYSIS")
+    txt_lines.append(f"Walking distance: {distance_label} m")
+    txt_lines.append("")
+    txt_lines.append("Legend:")
+    txt_lines.extend(legend_lines)
+    txt_lines.append("-" * 60)
+    txt_lines.append("")
+
+    csv_lines = [csv_header]
     total_entrances_all = 0
 
     # Process each district
@@ -118,33 +155,54 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
             area_pcts.append(area_pct)
             district_names.append(name)
 
-            # Output per district
+            # --- FORMAT DISTRICT BLOCK ---
+            block_header = "-" * 60
+            block_title = f"{name}"
+            block_summary = f"{total_label}: {int(count_total):<8} {accessible_label}: {int(count_accessible):<8} Area covered: {area_pct:6.2f} %"
+
+            # Print to ArcGIS log
+            arcpy.AddMessage(block_header)
+            arcpy.AddMessage(block_title)
+            arcpy.AddMessage(block_summary)
+
+            # Append to TXT
+            txt_lines.append(block_header)
+            txt_lines.append(block_title)
+            txt_lines.append(block_summary)
+
+            # Age groups table (only if available)
             if valid_group_fields:
-                header_msg = f"{name:<20} total: {int(count_total)} with access: {int(count_accessible)} ({area_pct:.2f}% area)"
-                arcpy.AddMessage(header_msg)
-                txt_lines.append(header_msg)
+                age_header = f"{'Age group':<10} {'Accessible':>10} / {'Total':<10} {'Percent':>8}"
+                age_sep = "-" * len(age_header)
+                arcpy.AddMessage(age_header)
+                arcpy.AddMessage(age_sep)
+                txt_lines.append(age_header)
+                txt_lines.append(age_sep)
+
                 for f in valid_group_fields:
-                    label = f.replace("sum_", "Age ").replace("_", "-").replace("65-", "65+")
+                    label = f.replace("sum_", "").replace("_", "-").replace("65-", "65+")
                     total = group_totals[f]
                     access = group_accesses[f]
                     pct = round(access / total * 100, 2) if total > 0 else 0.0
-                    line = f"  - {label:<10}: {access} / {total} | {pct:.2f}%"
+                    line = f"{label:<10} {int(access):>10} / {int(total):<10} {pct:>6.2f} %"
                     arcpy.AddMessage(line)
                     txt_lines.append(line)
-            else:
-                if has_population_field:
-                    msg = f"{name:<20} population: {int(count_total):<6} | area: {area_pct:>5.2f}%"
-                else:
-                    msg = f"{name:<20} entrances:  {int(count_total):<6} | area: {area_pct:>5.2f}%"
-                arcpy.AddMessage(msg)
-                txt_lines.append(msg)
 
+            txt_lines.append("")  # empty line after each district
+
+            # CSV simple
             csv_lines.append(f"{name},{count_total},{area_pct}")
             cursor.updateRow((name, geom, 1 if count_accessible > 0 else 0, district_area))
 
-    # Summary
-    arcpy.AddMessage("\nDISTRICT AREA COVERAGE SUMMARY")
-    arcpy.AddMessage("-" * 50)
+    # === SUMMARY SECTION ===
+    txt_lines.append("-" * 60)
+    txt_lines.append("DISTRICT AREA COVERAGE SUMMARY")
+    txt_lines.append("-" * 60)
+
+    arcpy.AddMessage("-" * 60)
+    arcpy.AddMessage("DISTRICT AREA COVERAGE SUMMARY")
+    arcpy.AddMessage("-" * 60)
+
     if area_pcts:
         max_area = max(area_pcts)
         min_area = min(area_pcts)
@@ -152,20 +210,44 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
         best_name = district_names[area_pcts.index(max_area)]
         worst_name = district_names[area_pcts.index(min_area)]
 
-        arcpy.AddMessage(f"→ Best:    {max_area}% ({best_name})")
-        arcpy.AddMessage(f"→ Worst:   {min_area}% ({worst_name})")
-        arcpy.AddMessage(f"→ Average: {avg_area}%")
+        txt_lines.append(f"Best coverage : {max_area:.2f} % ({best_name})")
+        txt_lines.append(f"Worst coverage: {min_area:.2f} % ({worst_name})")
+        txt_lines.append(f"Average       : {avg_area:.2f} %")
         if has_population_field:
-            arcpy.AddMessage(f"→ Total population: {total_entrances_all}")
+            txt_lines.append(f"Total population (all districts): {int(total_entrances_all)}")
         else:
-            arcpy.AddMessage(f"→ Total entrances:  {total_entrances_all}")
+            txt_lines.append(f"Total points (all districts): {int(total_entrances_all)}")
+
+        arcpy.AddMessage(f"Best coverage : {max_area:.2f} % ({best_name})")
+        arcpy.AddMessage(f"Worst coverage: {min_area:.2f} % ({worst_name})")
+        arcpy.AddMessage(f"Average       : {avg_area:.2f} %")
+        if has_population_field:
+            arcpy.AddMessage(f"Total population (all districts): {int(total_entrances_all)}")
+        else:
+            arcpy.AddMessage(f"Total points (all districts): {int(total_entrances_all)}")
     else:
-        arcpy.AddMessage("→ No data available.")
+        txt_lines.append("No district area data available.")
+        arcpy.AddMessage("No district area data available.")
+
+    # === LEGEND AGAIN AT END ===
+    txt_lines.append("")
+    txt_lines.append("Legend:")
+    txt_lines.extend(legend_lines)
+    txt_lines.append("")
+    txt_lines.append("=" * 60)
+    txt_lines.append("===      PARK ACCESSIBILITY ANALYSIS DONE      ===")
+    txt_lines.append("=" * 60)
+
+    arcpy.AddMessage("")
+    arcpy.AddMessage("Legend:")
+    for line in legend_lines:
+        arcpy.AddMessage(line)
 
     # Save TXT/CSV
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     txt_path = os.path.join(output_folder, f"accessibility_summary_{suffix}_{timestamp}.txt")
     csv_path = os.path.join(output_folder, f"accessibility_summary_{suffix}_{timestamp}.csv")
+
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write("\n".join(txt_lines))
     with open(csv_path, "w", encoding="utf-8") as f:
@@ -174,9 +256,9 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
     arcpy.AddMessage("\nSummary exported:")
     arcpy.AddMessage(f"→ TXT:  {txt_path}")
     arcpy.AddMessage(f"→ CSV:  {csv_path}")
-    arcpy.AddMessage("===================================================")
-    arcpy.AddMessage("===      PARK ACCESSIBILITY ANALYSIS DONE       ===")
-    arcpy.AddMessage("===================================================")
+    arcpy.AddMessage("=" * 60)
+    arcpy.AddMessage("===      PARK ACCESSIBILITY ANALYSIS DONE      ===")
+    arcpy.AddMessage("=" * 60)
 
 # Entry point
 def main():
