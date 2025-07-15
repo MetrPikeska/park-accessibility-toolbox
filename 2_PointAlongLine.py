@@ -1,9 +1,6 @@
 # ------------------------------------
 # Name: 2_PointsAlongLine.py
-# Author: Petr MIKESKA, Department of Geoinformatics, Faculty of Science, Palacký University Olomouc, 2025
-# Bachelor thesis title (EN): Assessing the availability of green spaces and parks for urban residents
-# Bachelor thesis title (CZ): Hodnocení dostupnosti zelených ploch a parků pro obyvatele měst
-# This script generates entrance points along park boundaries using the EU methodology.
+# This script generates entrance points along park boundaries using EU methodology.
 # Output is used in accessibility analysis (Tool 3 – NetworkAnalysis).
 # ------------------------------------
 
@@ -21,7 +18,9 @@ def generate_analysis_points(parks_layer, streets_layer, output_gdb, include_sma
     arcpy.AddMessage("===================================================")
     arcpy.AddMessage("===     ACCESSIBILITY POINT GENERATION START    ===")
     arcpy.AddMessage("===================================================")
-    arcpy.AddMessage("Author: Petr Mikeska (Bachelor's thesis)")
+    arcpy.AddMessage("Park categories:")
+    arcpy.AddMessage("  • P1HA  = Parks ≥ 1 ha (≥ 10,000 m²)")
+    arcpy.AddMessage("  • ALLP  = All parks (no size threshold)")
     arcpy.AddMessage("---------------------------------------------------")
 
     # Validate output workspace
@@ -34,8 +33,8 @@ def generate_analysis_points(parks_layer, streets_layer, output_gdb, include_sma
         arcpy.AddError("❌ Output layer base name is required.")
         raise ValueError("Missing output name.")
 
-    # Step 1: Aggregate input park polygons (to dissolve internal gaps)
-    arcpy.AddMessage("Aggregating input polygons using 10-meter distance...")
+    # Step 1: Aggregate input park polygons
+    arcpy.AddMessage("Aggregating park polygons (10 m distance)...")
     aggregated_parks = "in_memory/aggregated_parks"
     arcpy.cartography.AggregatePolygons(
         in_features=parks_layer,
@@ -46,36 +45,41 @@ def generate_analysis_points(parks_layer, streets_layer, output_gdb, include_sma
         orthogonality_option="NON_ORTHOGONAL"
     )
 
-    # Step 2: Calculate area of each polygon in m²
-    arcpy.AddMessage("Calculating area of aggregated polygons...")
+    # Save aggregated parks to GDB
+    aggregated_parks_out = os.path.join(output_gdb, f"{out_name}_AGGREGATED")
+    if arcpy.Exists(aggregated_parks_out):
+        arcpy.AddWarning("⚠ Aggregated parks already exist and will be overwritten.")
+        arcpy.management.Delete(aggregated_parks_out)
+    arcpy.management.CopyFeatures(aggregated_parks, aggregated_parks_out)
+    arcpy.AddMessage(f"✔ Aggregated parks saved: {aggregated_parks_out}")
+
+    # Step 2: Calculate area of polygons in m²
+    arcpy.AddMessage("Calculating polygon areas...")
     aggregated_parks_lyr = "aggregated_parks_lyr"
     area_field = "area_m2"
-
     arcpy.management.MakeFeatureLayer(aggregated_parks, aggregated_parks_lyr)
     if area_field not in [f.name for f in arcpy.ListFields(aggregated_parks_lyr)]:
         arcpy.management.AddField(aggregated_parks_lyr, area_field, "DOUBLE")
     arcpy.management.CalculateField(aggregated_parks_lyr, area_field, "!shape.area!", "PYTHON3")
 
     # Step 3: Select large parks ≥ 1 ha
-    arcpy.AddMessage("Selecting parks ≥ 1 ha...")
+    arcpy.AddMessage("Selecting parks ≥ 1 ha (P1HA)...")
     arcpy.management.SelectLayerByAttribute(aggregated_parks_lyr, "NEW_SELECTION", f'"{area_field}" >= 10000')
     arcpy.management.CopyFeatures(aggregated_parks_lyr, "in_memory/parks_large")
     count_large = int(arcpy.management.GetCount("in_memory/parks_large")[0])
     arcpy.AddMessage(f"✔ Parks ≥ 1 ha: {count_large:,}")
 
-    # Step 4: Optionally include small parks
+    # Step 4: Optionally include all parks
     if include_small_parks:
-        arcpy.AddMessage("Copying all parks (incl. < 1 ha)...")
+        arcpy.AddMessage("Copying all parks (ALLP, including < 1 ha)...")
         arcpy.management.SelectLayerByAttribute(aggregated_parks_lyr, "CLEAR_SELECTION")
         arcpy.management.CopyFeatures(aggregated_parks_lyr, "in_memory/parks_all")
         count_all = int(arcpy.management.GetCount("in_memory/parks_all")[0])
-        arcpy.AddMessage(f"✔ All parks:    {count_all:,}")
+        arcpy.AddMessage(f"✔ All parks: {count_all:,}")
 
     arcpy.AddMessage("---------------------------------------------------")
 
-    # ------------------------------------
     # Helper function to generate points from park polygons
-    # ------------------------------------
     def process(parks_fc, suffix):
         label = f"{out_name}_{suffix}"
         arcpy.AddMessage(f"--- Processing: {label} ---")
@@ -84,7 +88,7 @@ def generate_analysis_points(parks_layer, streets_layer, output_gdb, include_sma
         boundaries = f"in_memory/boundaries_{suffix}"
         arcpy.management.FeatureToLine(parks_fc, boundaries)
 
-        # Generate points along line every 50 m
+        # Generate points every 50 m
         points = f"in_memory/points_{suffix}"
         arcpy.management.GeneratePointsAlongLines(
             Input_Features=boundaries,
@@ -94,7 +98,7 @@ def generate_analysis_points(parks_layer, streets_layer, output_gdb, include_sma
             Include_End_Points="END_POINTS"
         )
 
-        # Select only points within 25 meters of the pedestrian network
+        # Select points within 25 m of the pedestrian network
         points_layer = f"points_lyr_{suffix}"
         arcpy.management.MakeFeatureLayer(points, points_layer)
         arcpy.management.SelectLayerByLocation(
@@ -110,22 +114,22 @@ def generate_analysis_points(parks_layer, streets_layer, output_gdb, include_sma
         if arcpy.Exists(out_path):
             arcpy.AddWarning(f"⚠ Output {label} already exists and will be overwritten.")
         arcpy.management.CopyFeatures(points_layer, out_path)
-        arcpy.AddMessage(f"✔ Output saved to: {out_path}")
+        arcpy.AddMessage(f"✔ Output saved: {out_path}")
         arcpy.AddMessage("---------------------------------------------------")
 
-    # Always generate for large parks
-    process("in_memory/parks_large", "large")
+    # Always generate for large parks (≥ 1 ha)
+    process("in_memory/parks_large", "P1HA")
 
     # Optionally generate for all parks
     if include_small_parks:
-        process("in_memory/parks_all", "all")
+        process("in_memory/parks_all", "ALLP")
 
     arcpy.AddMessage("===   ACCESSIBILITY POINT GENERATION COMPLETE   ===")
     arcpy.AddMessage("===================================================")
     arcpy.AddMessage("")
 
 # ------------------------------------
-# Script entry point – parameters passed from ArcGIS Toolbox
+# Script entry point – parameters from ArcGIS Toolbox
 # ------------------------------------
 if __name__ == "__main__":
     parks_layer         = arcpy.GetParameterAsText(0)
@@ -136,5 +140,9 @@ if __name__ == "__main__":
 
     generate_analysis_points(parks_layer, streets_layer, output_gdb, include_small_parks, out_name)
 
-    # Clean up
     del parks_layer, streets_layer, output_gdb, include_small_parks, out_name
+
+# Author: Petr MIKESKA
+# Bachelor thesis:
+#   Hodnocení dostupnosti zelených ploch a parků pro obyvatele měst (2025)
+#   Assessing the availability of green spaces and parks for urban residents (2025)
