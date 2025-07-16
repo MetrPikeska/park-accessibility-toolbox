@@ -1,11 +1,12 @@
 # ------------------------------------
 # Name: 3_NetworkAnalysis.py
-# This script calculates pedestrian service areas for parks using a network dataset 
+# This script calculates pedestrian service areas for parks using a network dataset
 # and dissolves them into a single polygon.
 # ------------------------------------
 
 import arcpy
 import os
+import sys
 
 # Always overwrite outputs
 arcpy.env.overwriteOutput = True
@@ -36,11 +37,11 @@ arcpy.AddMessage("---------------------------------------------------")
 # ------------------------------------
 if not arcpy.Exists(network_dataset):
     arcpy.AddError("❌ Network dataset does NOT exist.")
-    raise SystemExit()
+    sys.exit(1)
 
 if not arcpy.Exists(facilities_layer):
     arcpy.AddError("❌ Facilities layer does NOT exist.")
-    raise SystemExit()
+    sys.exit(1)
 
 # Validate travel distance
 try:
@@ -49,7 +50,29 @@ try:
         raise ValueError
 except:
     arcpy.AddError("❌ Invalid travel distance. Must be a positive number.")
-    raise SystemExit()
+    sys.exit(1)
+
+# ------------------------------------
+# Check Network Analyst Extension availability
+# ------------------------------------
+ext_status = arcpy.CheckExtension("Network")
+if ext_status != "Available":
+    arcpy.AddError("❌ Network Analyst Extension is NOT available. Check ArcGIS Pro license.")
+    sys.exit(1)
+else:
+    arcpy.CheckOutExtension("Network")
+    arcpy.AddMessage("✔ Network Analyst Extension is available and checked out.")
+
+# ------------------------------------
+# Validate that the dataset is a NetworkDataset
+# ------------------------------------
+desc_net = arcpy.Describe(network_dataset)
+if desc_net.dataType != "NetworkDataset":
+    arcpy.AddError("❌ The selected dataset is NOT a valid network dataset.")
+    arcpy.AddError("   Please select a valid network dataset (.nd) and try again.")
+    sys.exit(1)
+else:
+    arcpy.AddMessage("✔ Network dataset type is valid.")
 
 # ------------------------------------
 # Create service area layer
@@ -78,11 +101,19 @@ arcpy.na.AddLocations(service_area_layer, "Facilities", facilities_layer)
 arcpy.AddMessage("✔ Facilities added.")
 
 # ------------------------------------
-# Solve network analysis
+# Solve network analysis with error handling
 # ------------------------------------
 arcpy.AddMessage("Solving service area...")
-arcpy.na.Solve(service_area_layer)
-arcpy.AddMessage("✔ Service area solved.")
+try:
+    arcpy.na.Solve(service_area_layer)
+    arcpy.AddMessage("✔ Service area solved.")
+except Exception as e:
+    arcpy.AddError("❌ Service Area Solver failed. Possible reasons:")
+    arcpy.AddError("   – The network dataset is NOT built (use 'Build Network Dataset' in ArcGIS Pro)")
+    arcpy.AddError("   – Some facility locations are outside the network")
+    arcpy.AddError("   – Licensing issues with the Network Analyst Extension")
+    arcpy.AddError(f"Detailed error: {e}")
+    sys.exit(1)
 
 # ------------------------------------
 # Save intermediate polygons
@@ -138,7 +169,7 @@ arcpy.AddMessage("===================================================")
 
 # Clean memory
 del network_dataset, facilities_layer, output_service_area, travel_distance
-del service_area_layer, facility_count, temp_polygons, polygon_count, final_count, gdb_path
+del service_area_layer, facility_count, temp_polygons, polygon_count, final_count, gdb_path, desc_net
 
 # Author: Petr MIKESKA
 # Bachelor thesis:
