@@ -3,7 +3,6 @@
 # This script calculates population/accessibility statistics for each hexagon
 # based on address points (original data) and a Service Area polygon (Tool 3 output).
 # ------------------------------------
-
 import arcpy
 import sys
 
@@ -32,24 +31,26 @@ arcpy.AddMessage("")
 arcpy.AddMessage("===================================================")
 arcpy.AddMessage("===   HEXAGON POPULATION ACCESSIBILITY START   ===")
 arcpy.AddMessage("===================================================")
-arcpy.AddMessage(f"Input hexagons:       {hex_layer}")
-arcpy.AddMessage(f"Address points:       {pop_points_input}")
-arcpy.AddMessage(f"Accessibility polygon:{access_polygon}")
-arcpy.AddMessage(f"Output hexagons:      {output_hex_layer}")
-arcpy.AddMessage(f"Threshold:            {ratio_threshold}%")
+arcpy.AddMessage(f"Input hexagons:        {hex_layer}")
+arcpy.AddMessage(f"Address points:        {pop_points_input}")
+arcpy.AddMessage(f"Accessibility polygon: {access_polygon}")
+arcpy.AddMessage(f"Output hexagons:       {output_hex_layer}")
+arcpy.AddMessage(f"Threshold:             {ratio_threshold} %")
 arcpy.AddMessage("---------------------------------------------------")
 
 # ------------------------------------
 # Validate inputs
 # ------------------------------------
 if not arcpy.Exists(hex_layer):
-    arcpy.AddError("❌ Input hexagon layer does NOT exist.")
+    arcpy.AddError("The input hexagon layer does not exist. Please check the path or run Tool 5 first.")
     sys.exit(1)
+
 if not arcpy.Exists(pop_points_input):
-    arcpy.AddError("❌ Address points layer does NOT exist.")
+    arcpy.AddError("The address points layer does not exist. Please verify the dataset.")
     sys.exit(1)
+
 if not arcpy.Exists(access_polygon):
-    arcpy.AddError("❌ Accessibility polygon (Service Area) does NOT exist. Run Tool 3 first.")
+    arcpy.AddError("The accessibility polygon (Service Area) does not exist. Please run Tool 3 first.")
     sys.exit(1)
 
 # ------------------------------------
@@ -57,7 +58,7 @@ if not arcpy.Exists(access_polygon):
 # ------------------------------------
 desc = arcpy.Describe(pop_points_input)
 if desc.shapeType == "Multipoint":
-    arcpy.AddMessage("Converting Multipoint to Singlepoint...")
+    arcpy.AddMessage("Converting Multipoint features to individual Singlepoints...")
     arcpy.MultipartToSinglepart_management(pop_points_input, points_single)
 else:
     arcpy.CopyFeatures_management(pop_points_input, points_single)
@@ -65,7 +66,7 @@ else:
 # ------------------------------------
 # Spatial join: points + accessibility polygon
 # ------------------------------------
-arcpy.AddMessage("Joining address points to accessibility polygon (Service Area)...")
+arcpy.AddMessage("Joining address points to the accessibility polygon (Service Area)...")
 arcpy.analysis.SpatialJoin(
     target_features=points_single,
     join_features=access_polygon,
@@ -81,15 +82,15 @@ with arcpy.da.UpdateCursor(points_flagged, ["Join_Count", "has_access"]) as curs
     for row in cursor:
         row[1] = 1 if row[0] and row[0] > 0 else 0
         cursor.updateRow(row)
-arcpy.AddMessage("✔ Address points flagged for accessibility.")
+arcpy.AddMessage("Address points have been flagged for accessibility (inside/outside Service Area).")
 
 # ------------------------------------
-# Prepare hexagon copy with readable output fields
+# Prepare hexagon copy with required output fields
 # ------------------------------------
 arcpy.CopyFeatures_management(hex_layer, hex_copy)
 fields = [f.name for f in arcpy.ListFields(hex_copy)]
 
-# Decide which field names to use based on population availability
+# Decide which output fields are needed based on population availability
 if pop_field:
     needed_fields = {
         "Total_Population": "DOUBLE",
@@ -99,7 +100,7 @@ if pop_field:
         "Points_Without_Access": "LONG",
         "Above_Threshold": "SHORT"
     }
-    arcpy.AddMessage("→ Population field detected: will calculate number of residents per hexagon.")
+    arcpy.AddMessage("Population field detected – calculating number of residents per hexagon.")
 else:
     needed_fields = {
         "Total_Points": "LONG",
@@ -109,9 +110,9 @@ else:
         "Points_Without_Access": "LONG",
         "Above_Threshold": "SHORT"
     }
-    arcpy.AddMessage("→ No population field: will calculate only number of address points per hexagon.")
+    arcpy.AddMessage("No population field provided – counting only number of address points per hexagon.")
 
-# Add missing fields
+# Add missing fields to hexagons
 for field, ftype in needed_fields.items():
     if field not in fields:
         arcpy.AddField_management(hex_copy, field, ftype)
@@ -124,14 +125,16 @@ arcpy.MakeFeatureLayer_management(points_flagged, "points_lyr")
 # ------------------------------------
 # Main loop: calculate stats for each hexagon
 # ------------------------------------
-arcpy.AddMessage("Processing hexagons...")
+arcpy.AddMessage("Processing hexagons and calculating accessibility statistics...")
 total_hex = int(arcpy.management.GetCount(hex_copy)[0])
 processed = 0
 
 with arcpy.da.UpdateCursor(hex_copy, ["OBJECTID", "SHAPE@"] + list(needed_fields.keys())) as cursor:
     for row in cursor:
         geom = row[1]
-        arcpy.SelectLayerByLocation_management("points_lyr", "WITHIN", geom, selection_type="NEW_SELECTION")
+        arcpy.SelectLayerByLocation_management(
+            "points_lyr", "WITHIN", geom, selection_type="NEW_SELECTION"
+        )
 
         total_val, access_val = 0, 0
         count_with, count_without = 0, 0
@@ -180,10 +183,10 @@ with arcpy.da.UpdateCursor(hex_copy, ["OBJECTID", "SHAPE@"] + list(needed_fields
         # Progress log every 100 hexagons
         processed += 1
         if processed % 100 == 0:
-            arcpy.AddMessage(f"… processed {processed}/{total_hex} hexagons ({round(processed/total_hex*100,1)} %)")
+            arcpy.AddMessage(f"Processed {processed}/{total_hex} hexagons ({round(processed/total_hex*100,1)} %)")
 
 # ------------------------------------
-# Save output and clean temp
+# Save final output and clean temporary data
 # ------------------------------------
 arcpy.CopyFeatures_management(hex_copy, output_hex_layer)
 
@@ -193,22 +196,21 @@ arcpy.Delete_management(hex_copy)
 arcpy.Delete_management("points_lyr")
 
 # ------------------------------------
-# Final info about 0% hexagons
+# Inform about 0% hexagons
 # ------------------------------------
-arcpy.AddMessage("ℹ Note: Hexagons with 0% accessibility may still be near parks but contain no address points or no residents.")
-arcpy.AddMessage("")
-arcpy.AddMessage("===================================================")
-arcpy.AddMessage("✔ The final layer has been successfully created and saved to geodatabase:")
-arcpy.AddMessage(f"  {output_hex_layer}")
-arcpy.AddMessage("You can now manually add it to the map if needed.")
-arcpy.AddMessage("===================================================")
+arcpy.AddMessage(
+    "Note: Hexagons with 0% accessibility may still be near parks but contain no address points or no population."
+)
 
 # ------------------------------------
 # Footer log
 # ------------------------------------
-arcpy.AddMessage("===    HEXAGON POPULATION ACCESSIBILITY DONE   ===")
+arcpy.AddMessage("")
 arcpy.AddMessage("===================================================")
+arcpy.AddMessage("===  HEXAGON POPULATION ACCESSIBILITY COMPLETED ===")
+arcpy.AddMessage("===================================================")
+arcpy.AddMessage(f"Final layer saved to: {output_hex_layer}")
 
-# Clean vars
+# Clean variables
 del hex_layer, pop_points_input, access_polygon, pop_field, output_hex_layer, ratio_threshold
 del points_single, points_flagged, hex_copy, fields, needed_fields
