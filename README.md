@@ -50,32 +50,32 @@ The toolbox consists of six main Python scripts:
 
 ## Requirements
 
-- **ArcGIS Pro** (version 3.0 or later recommended)
-- **Network Analyst Extension** (licensed and enabled)
-- Prepared input datasets (see Usage section)
+-   **ArcGIS Pro** (version 3.0 or later recommended)
+-   **Network Analyst Extension** (licensed and enabled)
+-   Prepared input datasets (see Usage section)
 
 ---
 
 ## How to Use
 
 1.  **Prepare Your Data:**
-    - A **road network** feature class (polylines).
-    - A **parks** feature class (polygons).
-    - **Population points** or address points (points).
-    - **District boundaries** (polygons, for district-level analysis).
+    -   A **road network** feature class (polylines).
+    -   A **parks** feature class (polygons).
+    -   **Population points** or address points (points).
+    -   **District boundaries** (polygons, for district-level analysis).
     *Ensure all layers are in the same projected coordinate system.*
 
 2.  **Set Up the Toolbox:**
-    - Clone or download this repository.
-    - In ArcGIS Pro, add the `Accessibility_of_urban_greenery.atbx` toolbox to your project.
+    -   Clone or download this repository.
+    -   In ArcGIS Pro, add the `Accessibility_of_urban_greenery.atbx` toolbox to your project.
 
 3.  **Run the Tools Sequentially:**
-    - **Tool 1: Network Dataset:** Use your road network to create the pedestrian network.
-    - **Tool 2: Park Entrances:** Generate park access points using the parks and road layers.
-    - **Tool 3: Service Area:** Calculate the walkable area from the park entrances.
-    - **Tool 4 or 6:** Choose your analysis unit:
-        - Run **Tool 4** for analysis by administrative districts.
-        - Run **Tool 5** and then **Tool 6** for a hexagon-based analysis.
+    -   **Tool 1: Network Dataset:** Use your road network to create the pedestrian network.
+    -   **Tool 2: Park Entrances:** Generate park access points using the parks and road layers.
+    -   **Tool 3: Service Area:** Calculate the walkable area from the park entrances.
+    -   **Tool 4 or 6:** Choose your analysis unit:
+        -   Run **Tool 4** for analysis by administrative districts.
+        -   Run **Tool 5** and then **Tool 6** for a hexagon-based analysis.
 
 ---
 
@@ -83,8 +83,10 @@ The toolbox consists of six main Python scripts:
 
 **Petr Mikeska**  
 Department of Geoinformatics, Palacký University Olomouc  
-- **Email:** piter.mikeska@gmail.com
-- **Instagram:** [@petamikeska](https://www.instagram.com/petamikeska)
+-   **Website:** [petrmikeska.cz](https://petrmikeska.cz)
+-   **GitHub:** [MetrPikeska](https://github.com/MetrPikeska)
+-   **Email:** piter.mikeska@gmail.com
+-   **Instagram:** [@petamikeska](https://www.instagram.com/petamikeska)
 
 This work is based on the bachelor's thesis "Assessing the availability of green spaces and parks for urban residents" (2025).
 
