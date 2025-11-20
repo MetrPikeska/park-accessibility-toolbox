@@ -1,90 +1,95 @@
-# Park Accessibility Toolbox
+# Park Accessibility Toolbox for ArcGIS Pro
 
-Toolbox for assessing the availability of green spaces and parks for urban residents using network analysis and GIS scripts. This toolbox was developed as part of the bachelor's thesis at the Department of Geoinformatics, Faculty of Science, Palacký University Olomouc.
+This repository contains an ArcGIS Pro toolbox designed to assess the accessibility of urban green spaces. The tools automate key geoprocessing tasks, from creating a network dataset to analyzing population access within a specified walking distance. The methodology is based on the European Commission's 2021 guide, "A short walk to the park?".
 
----
-
-## Author
-**Petr Mikeska**  
-Department of Geoinformatics, Faculty of Science, Palacký University Olomouc  
-Bachelor Thesis  
-Year: 2025  
-
-- Instagram: [@petamikeska](https://www.instagram.com/petamikeska)  
-- Email: piter.mikeska@gmail.com
+This project was developed as part of a bachelor's thesis at the Department of Geoinformatics, Palacký University Olomouc (2025).
 
 ---
 
-## Thesis Title
-**English:** Assessing the availability of green spaces and parks for urban residents  
-**Czech:** Hodnocení dostupnosti zelených ploch a parků pro obyvatele měst
+## Workflow Overview
 
-### Thesis Assignment
-The goal of the thesis is to calculate the accessibility of green areas and parks within a city based on the methodology of the European Commission Directorate General for Regional and Urban Policy (*A short walk to the park?*, updated 2021 version). Alternative procedures and input data are also considered. Suitable datasets are selected and the results influenced by different approaches and data sources are compared.  
+The toolbox follows a sequential workflow, where the output of one tool often serves as the input for another.
 
-The scripts for ArcGIS Pro, provided by the updated 2021 methodology, are used and modified where necessary. All modifications are described and justified. The accessibility is assessed for the city of **Olomouc** and two additional Czech cities — **Brno** and **Ostrava** — to evaluate the applicability of the methodology in the local context.
+```
+[Input Data]
+     |
+     v
+[1. Network Dataset] -> Creates pedestrian network from roads.
+     |
+     v
+[2. Park Entrances] -> Generates access points to parks.
+     |
+     v
+[3. Service Area] -> Calculates walkable areas around parks.
+     |   \
+     |    \__________________________________________
+     |                                             |
+     v                                             v
+[4. District Analysis] -> Aggregates results by   [6. Hexagon Analysis] -> Aggregates results
+     |                     administrative unit.        |                     into a uniform grid.
+     |                                             |
+[Reports & Maps]                                [5. Hexagon Grid] -> Creates the grid for analysis.
+```
 
 ---
 
-## Toolbox Content
-This repository contains Python scripts for the ArcGIS Pro environment:
+## Toolbox Scripts
 
-- **1_NetworkDataset.py**  
-  Creates a pedestrian network dataset from input road data (excluding highways). Based on Copernicus/Urban Atlas assumptions and Network Analyst standards.
+The toolbox consists of six main Python scripts:
 
-- **2_PointAlongLine.py**  
-  Generates entry points along the park polygon boundaries (≥1 ha), selecting only those within 25 meters of the road network.
-
-- **3_NetworkAnalysis.py**  
-  Calculates 400 m service areas from the park entry points using the network dataset. Dissolves output into one polygon representing the accessible green zone.
-
-- **4_AnalyzeParkAccesibility.py**  
-  Analyzes accessibility for each administrative district: calculates share of population and area within 400 m from green areas.
-
-- **5_GenerateHexGrid.py**  
-  Creates a hexagonal tessellation (e.g. 250 m resolution) for spatially neutral analysis of accessibility over the entire city.
-
-- **6_HexPopulationAcces.py**  
-  Assigns population statistics to hexagons: total vs. accessible population, including entry point availability.
+| # | Script Name                 | Description                                                                                              |
+|---|-----------------------------|----------------------------------------------------------------------------------------------------------|
+| 1 | `1_NetworkDataset.py`         | Creates a routable pedestrian network dataset from a road layer.                                         |
+| 2 | `2_PointAlongLine.py`         | Generates potential park entrance points along park boundaries that are close to the road network.       |
+| 3 | `3_NetworkAnalysis.py`        | Calculates the service area (walkable zone) from the park entrances using the network dataset.           |
+| 4 | `4_AnalyzeParkAccesibility.py`| Analyzes accessibility by administrative districts, calculating population and area coverage statistics. |
+| 5 | `5_GenerateHexGrid.py`        | Creates a hexagonal grid over the study area for spatially uniform analysis.                             |
+| 6 | `6_HexPopulationAcces.py`     | Assigns population and accessibility statistics to each hexagon in the grid.                               |
 
 ---
 
 ## Requirements
-- ArcGIS Pro (3.0+ recommended)
-- Python 3.x (installed with ArcGIS Pro)
-- ArcPy library
-- Network Analyst Extension (licensed)
+
+- **ArcGIS Pro** (version 3.0 or later recommended)
+- **Network Analyst Extension** (licensed and enabled)
+- Prepared input datasets (see Usage section)
 
 ---
 
-## Usage
-Each script can be run independently via ArcGIS Pro toolbox or the Python command line. Before running the scripts, ensure you have prepared appropriate datasets:
+## How to Use
 
-- Road network (with walkable attributes)
-- Parks polygon layer (preferably with area in m²)
-- Address or population points (with optional age/household attributes)
-- District boundaries (for district-based analysis)
+1.  **Prepare Your Data:**
+    - A **road network** feature class (polylines).
+    - A **parks** feature class (polygons).
+    - **Population points** or address points (points).
+    - **District boundaries** (polygons, for district-level analysis).
+    *Ensure all layers are in the same projected coordinate system.*
 
-The scripts assume all data are projected correctly and topologically valid. All accessibility calculations are based on a **400 meter walking distance**, in accordance with SDG 11.7.1 and the updated European Commission methodology (*Poelman & Robe, 2021*).
+2.  **Set Up the Toolbox:**
+    - Clone or download this repository.
+    - In ArcGIS Pro, add the `Accessibility_of_urban_greenery.atbx` toolbox to your project.
+
+3.  **Run the Tools Sequentially:**
+    - **Tool 1: Network Dataset:** Use your road network to create the pedestrian network.
+    - **Tool 2: Park Entrances:** Generate park access points using the parks and road layers.
+    - **Tool 3: Service Area:** Calculate the walkable area from the park entrances.
+    - **Tool 4 or 6:** Choose your analysis unit:
+        - Run **Tool 4** for analysis by administrative districts.
+        - Run **Tool 5** and then **Tool 6** for a hexagon-based analysis.
+
+---
+
+## Author & Contact
+
+**Petr Mikeska**  
+Department of Geoinformatics, Palacký University Olomouc  
+- **Email:** piter.mikeska@gmail.com
+- **Instagram:** [@petamikeska](https://www.instagram.com/petamikeska)
+
+This work is based on the bachelor's thesis "Assessing the availability of green spaces and parks for urban residents" (2025).
 
 ---
 
 ## License
-This repository and its content are provided under the MIT License.
 
----
-
-## Acknowledgements
-This work was developed in the context of a bachelor's thesis at **Palacký University Olomouc**, based on the updated European Commission methodology for assessing access to green urban areas:  
-Poelman, H. & Robe, E. (2021): *A short walk to the park?*
-
-Also inspired by:
-- Copernicus Urban Atlas methodology (DG REGIO, 2018)  
-- UN-Habitat guidelines for SDG 11.7.1  
-- Academic literature on socio-spatial accessibility (Jogdande & Bandyopadhyay, 2022; Ferenchak & Barney, 2024)
-
----
-
-For any questions regarding this toolbox, please contact **Petr Mikeska**:  
-- Instagram: [@petamikeska](https://www.instagram.com/petamikeska)  
-- Email: piter.mikeska@gmail.com
+This project is licensed under the **MIT License**.

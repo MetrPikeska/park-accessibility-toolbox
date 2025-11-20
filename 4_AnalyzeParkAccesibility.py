@@ -1,297 +1,237 @@
 # ------------------------------------
 # Name: 4_AnalyzeParkAccessibility.py
-# This script analyzes accessibility of green space within a defined walking distance for each city district.
+# Purpose: This script analyzes the accessibility of green space for each city district.
 # ------------------------------------
 import arcpy
 import os
 import sys
+import csv
 from datetime import datetime
 
+# ------------------------------------
+# Function to validate coordinate system consistency
+# ------------------------------------
+def validate_crs_consistency(layers, layer_names):
+    """
+    Validates that all input layers use the same coordinate system.
+    Returns the common spatial reference if consistent, otherwise raises an error.
+    """
+    if not layers or len(layers) < 2:
+        return None
+    
+    spatial_refs = []
+    for i, layer in enumerate(layers):
+        if not arcpy.Exists(layer):
+            continue
+        try:
+            desc = arcpy.Describe(layer)
+            sr = desc.spatialReference
+            if sr:
+                spatial_refs.append((sr, layer_names[i] if i < len(layer_names) else f"Layer {i+1}"))
+        except Exception as e:
+            arcpy.AddWarning(f"Could not read spatial reference from {layer}: {e}")
+            continue
+    
+    if not spatial_refs:
+        return None
+    
+    reference_sr, reference_name = spatial_refs[0]
+    
+    # Compare the spatial reference of each layer to the first one.
+    for sr, name in spatial_refs[1:]:
+        if sr.factoryCode != reference_sr.factoryCode:
+            arcpy.AddError(
+                f"Coordinate system mismatch detected!\n"
+                f"  {reference_name}: {reference_sr.name} (EPSG: {reference_sr.factoryCode})\n"
+                f"  {name}: {sr.name} (EPSG: {sr.factoryCode})\n"
+                f"All input layers must use the same coordinate system for correct analysis results."
+            )
+            raise arcpy.ExecuteError("Coordinate system mismatch between input layers.")
+    
+    return reference_sr
+
+# ------------------------------------
+# Main analysis function
+# ------------------------------------
 def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fields_raw,
-                          output_gdb, distance_label, districts_fc, district_field):
+                          output_gdb, distance_label, districts_fc, district_field, area_field=None):
 
     arcpy.env.overwriteOutput = True
 
+    # --- Define output paths ---
     suffix = f"{distance_label}m"
     output_points_fc = os.path.join(output_gdb, f"points_accessibility_{suffix}")
     output_districts_fc = os.path.join(output_gdb, f"districts_accessibility_{suffix}")
-    access_area_clip = os.path.join("in_memory", f"access_area_clip_{suffix}")
     output_folder = os.path.dirname(output_gdb)
 
-    # ------------------------------------
-    # Header log
-    # ------------------------------------
-    arcpy.AddMessage("")
-    arcpy.AddMessage("===================================================")
+    arcpy.AddMessage("\n===================================================")
     arcpy.AddMessage("===      PARK ACCESSIBILITY ANALYSIS START      ===")
     arcpy.AddMessage("===================================================")
     arcpy.AddMessage(f"Walking distance threshold: {distance_label} m")
     arcpy.AddMessage("---------------------------------------------------")
 
-    # ------------------------------------
-    # Validate input layers and output paths
-    # ------------------------------------
+    # --- Validate inputs ---
     for fc in [accessibility_fc, input_fc, districts_fc]:
         if not arcpy.Exists(fc):
-            arcpy.AddError(
-                f"Input layer '{fc}' does not exist. Please verify the path or dataset name."
-            )
-            sys.exit(1)
+            raise arcpy.ExecuteError(f"Input layer '{fc}' does not exist.")
 
     if not output_gdb or not output_gdb.lower().endswith(".gdb"):
-        arcpy.AddError(
-            "Invalid or missing output geodatabase. Please specify a valid File Geodatabase (.gdb)."
-        )
-        sys.exit(1)
+        raise arcpy.ExecuteError("Invalid output geodatabase. Must be a File Geodatabase (.gdb).")
+    
+    # --- Validate coordinate systems ---
+    validate_crs_consistency(
+        [accessibility_fc, input_fc, districts_fc],
+        ["Accessibility layer", "Input points layer", "Districts layer"]
+    )
+    arcpy.AddMessage("Coordinate systems validated.")
 
-    # ------------------------------------
-    # Create or load points accessibility layer
-    # ------------------------------------
+    # --- Determine accessible points using Spatial Join ---
     if not arcpy.Exists(output_points_fc):
         arcpy.AddMessage(f"Creating points accessibility layer: {output_points_fc}")
         arcpy.analysis.SpatialJoin(
-            target_features=input_fc,
-            join_features=accessibility_fc,
-            out_feature_class=output_points_fc,
-            join_operation="JOIN_ONE_TO_ONE",
-            join_type="KEEP_ALL",
-            match_option="INTERSECT"
+            target_features=input_fc, join_features=accessibility_fc,
+            out_feature_class=output_points_fc, join_type="KEEP_ALL", match_option="INTERSECT"
         )
     else:
-        arcpy.AddMessage(f"Existing points accessibility layer detected: {output_points_fc}")
+        arcpy.AddMessage(f"Using existing points accessibility layer: {output_points_fc}")
 
-    # Count points
-    count_points = int(arcpy.management.GetCount(output_points_fc)[0])
-    arcpy.AddMessage(f"Number of points in accessibility layer: {count_points}")
-
-    # Make layer from output points
+    # --- Mark points inside the accessibility area ---
     arcpy.management.MakeFeatureLayer(output_points_fc, "output_layer_temp")
-
-    # Add near_park field if missing
     if "near_park" not in [f.name for f in arcpy.ListFields(output_points_fc)]:
         arcpy.management.AddField(output_points_fc, "near_park", "SHORT")
-
-    # ------------------------------------
-    # Determine which population fields to use
-    # ------------------------------------
-    group_fields = [f.strip() for f in group_fields_raw.split(";") if f.strip()] if group_fields_raw else []
-    existing_fields = [f.name for f in arcpy.ListFields(output_points_fc)]
-    valid_group_fields = [f for f in group_fields if f in existing_fields]
-    has_population_field = population_field in existing_fields
-    use_population_data = bool(valid_group_fields or has_population_field)
-
-    # Dynamic legend and headers
-    if has_population_field or valid_group_fields:
-        total_label = "Total population"
-        accessible_label = "Accessible"
-        csv_header = "District,PopulationAccessible,AreaCoveredPercent"
-        legend_lines = [
-            "- Total population = all people in district (if population data available)",
-            "- Accessible = number of people within walking distance",
-            "- Area covered = % of district area within walking distance"
-        ]
-    else:
-        total_label = "Total points"
-        accessible_label = "Accessible"
-        csv_header = "District,PointsAccessible,AreaCoveredPercent"
-        legend_lines = [
-            "- Total points = all address locations in district (if no population data)",
-            "- Accessible = number of address points within walking distance",
-            "- Area covered = % of district area within walking distance"
-        ]
-
-    # Decide fields for analysis
-    if use_population_data:
-        if valid_group_fields:
-            fields = valid_group_fields + ["near_park"]
-            arcpy.AddMessage(f"Using population groups: {', '.join(valid_group_fields)}")
-        else:
-            fields = [population_field, "near_park"]
-            arcpy.AddMessage(f"Using population field: {population_field}")
-    else:
-        fields = ["near_park"]
-        arcpy.AddMessage("No population data detected – counting only address points.")
-
-    # ------------------------------------
-    # Print legend at start
-    # ------------------------------------
-    arcpy.AddMessage("")
-    arcpy.AddMessage("Legend:")
-    for line in legend_lines:
-        arcpy.AddMessage(line)
-    arcpy.AddMessage("---------------------------------------------------")
-
-    # Mark points within accessibility polygon
-    arcpy.management.SelectLayerByLocation(
-        "output_layer_temp", "WITHIN", accessibility_fc, selection_type="NEW_SELECTION"
-    )
+    arcpy.management.SelectLayerByLocation("output_layer_temp", "WITHIN", accessibility_fc)
     arcpy.management.CalculateField("output_layer_temp", "near_park", 1, "PYTHON3")
     arcpy.management.SelectLayerByAttribute("output_layer_temp", "CLEAR_SELECTION")
 
-    # ------------------------------------
-    # Prepare district layer
-    # ------------------------------------
+    # --- Prepare a copy of the districts layer for results ---
     arcpy.management.CopyFeatures(districts_fc, output_districts_fc)
-    arcpy.management.MakeFeatureLayer(output_districts_fc, "district_layer")
-    if "near_park_district" not in [f.name for f in arcpy.ListFields(output_districts_fc)]:
-        arcpy.management.AddField(output_districts_fc, "near_park_district", "SHORT")
 
-    # Stats containers
-    area_pcts, district_names = [], []
-    txt_lines = []
-    csv_lines = [csv_header]
-    total_entrances_all = 0
-
-    # Header for TXT summary
-    txt_lines.append("PARK ACCESSIBILITY ANALYSIS")
-    txt_lines.append(f"Walking distance: {distance_label} m")
-    txt_lines.append("")
-    txt_lines.append("Legend:")
-    txt_lines.extend(legend_lines)
-    txt_lines.append("-" * 60)
-    txt_lines.append("")
-
-    # ------------------------------------
-    # Process each district
-    # ------------------------------------
-    with arcpy.da.UpdateCursor(output_districts_fc, [district_field, "SHAPE@", "near_park_district", "Shape_Area"]) as cursor:
-        for name, geom, flag, district_area in cursor:
-            # Select points in current district
-            arcpy.management.SelectLayerByLocation(
-                "output_layer_temp", "WITHIN", geom, selection_type="NEW_SELECTION"
-            )
-
-            count_total = 0
-            count_accessible = 0
-            group_totals = {f: 0 for f in valid_group_fields}
-            group_accesses = {f: 0 for f in valid_group_fields}
-
-            # Loop through selected points
-            with arcpy.da.SearchCursor("output_layer_temp", fields) as p_cursor:
-                for row in p_cursor:
-                    if use_population_data:
-                        if valid_group_fields:
-                            for i, f in enumerate(valid_group_fields):
-                                group_totals[f] += row[i]
-                                if row[-1] == 1:
-                                    group_accesses[f] += row[i]
-                            count_total += sum(row[:len(valid_group_fields)])
-                            if row[-1] == 1:
-                                count_accessible += sum(row[:len(valid_group_fields)])
-                        else:
-                            count_total += row[0]
-                            if row[1] == 1:
-                                count_accessible += row[0]
-                    else:
-                        count_total += 1
-                        if row[0] == 1:
-                            count_accessible += 1
-
-            total_entrances_all += count_total
-
-            # Clip accessibility area with district geometry
-            arcpy.analysis.Clip(accessibility_fc, geom, access_area_clip)
-            accessible_geom_area = sum(r[0] for r in arcpy.da.SearchCursor(access_area_clip, ["SHAPE@AREA"]))
-            area_pct = round((accessible_geom_area / district_area) * 100, 2) if district_area > 0 else 0
-            area_pcts.append(area_pct)
-            district_names.append(name)
-
-            # District summary block
-            block_header = "-" * 60
-            block_summary = f"{total_label}: {int(count_total):<8} {accessible_label}: {int(count_accessible):<8} Area covered: {area_pct:6.2f} %"
-
-            arcpy.AddMessage(block_header)
-            arcpy.AddMessage(name)
-            arcpy.AddMessage(block_summary)
-
-            txt_lines.append(block_header)
-            txt_lines.append(name)
-            txt_lines.append(block_summary)
-
-            # Age groups table (only if available)
-            if valid_group_fields:
-                age_header = f"{'Age group':<10} {'Accessible':>10} / {'Total':<10} {'Percent':>8}"
-                txt_lines.append(age_header)
-                txt_lines.append("-" * len(age_header))
-                for f in valid_group_fields:
-                    label = f.replace("sum_", "").replace("_", "-").replace("65-", "65+")
-                    total = group_totals[f]
-                    access = group_accesses[f]
-                    pct = round(access / total * 100, 2) if total > 0 else 0.0
-                    txt_lines.append(f"{label:<10} {int(access):>10} / {int(total):<10} {pct:>6.2f} %")
-            txt_lines.append("")  # empty line after district
-
-            # CSV simple summary
-            csv_lines.append(f"{name},{count_total},{area_pct}")
-
-            # Update district attribute
-            cursor.updateRow((name, geom, 1 if count_accessible > 0 else 0, district_area))
-
-    # ------------------------------------
-    # SUMMARY SECTION
-    # ------------------------------------
-    txt_lines.append("-" * 60)
-    txt_lines.append("DISTRICT AREA COVERAGE SUMMARY")
-    txt_lines.append("-" * 60)
-
-    arcpy.AddMessage("-" * 60)
-    arcpy.AddMessage("DISTRICT AREA COVERAGE SUMMARY")
-    arcpy.AddMessage("-" * 60)
-
-    if area_pcts:
-        max_area = max(area_pcts)
-        min_area = min(area_pcts)
-        avg_area = round(sum(area_pcts) / len(area_pcts), 2)
-        best_name = district_names[area_pcts.index(max_area)]
-        worst_name = district_names[area_pcts.index(min_area)]
-
-        txt_lines.append(f"Best coverage : {max_area:.2f} % ({best_name})")
-        txt_lines.append(f"Worst coverage: {min_area:.2f} % ({worst_name})")
-        txt_lines.append(f"Average       : {avg_area:.2f} %")
-        if has_population_field:
-            txt_lines.append(f"Total population (all districts): {int(total_entrances_all)}")
-        else:
-            txt_lines.append(f"Total points (all districts): {int(total_entrances_all)}")
-
-        arcpy.AddMessage(f"Best coverage : {max_area:.2f} % ({best_name})")
-        arcpy.AddMessage(f"Worst coverage: {min_area:.2f} % ({worst_name})")
-        arcpy.AddMessage(f"Average       : {avg_area:.2f} %")
+    # --- Find or calculate the area for each district ---
+    district_fields = [f.name for f in arcpy.ListFields(output_districts_fc)]
+    area_field_name = None
+    common_area_names = ["Shape_Area", "SHAPE_Area", "Area"]
+    if area_field and area_field.strip() in district_fields:
+        area_field_name = area_field.strip()
     else:
-        txt_lines.append("No district area data available.")
-        arcpy.AddMessage("No district area data available.")
+        for name in common_area_names:
+            if name in district_fields:
+                area_field_name = name
+                break
+    if not area_field_name:
+        area_field_name = "Shape_Area"
+        arcpy.management.AddField(output_districts_fc, area_field_name, "DOUBLE")
+        arcpy.management.CalculateGeometryAttributes(output_districts_fc, [[area_field_name, "AREA"]], area_unit="SQUARE_METERS")
+    arcpy.AddMessage(f"Using '{area_field_name}' as the district area field.")
 
-    # Legend repeated at the end
-    txt_lines.append("")
-    txt_lines.append("Legend:")
-    txt_lines.extend(legend_lines)
-    txt_lines.append("")
-    txt_lines.append("=" * 60)
-    txt_lines.append("===      PARK ACCESSIBILITY ANALYSIS DONE      ===")
-    txt_lines.append("=" * 60)
+    # --- Optimized Analysis Workflow ---
+    temp_layers = []
+    try:
+        # Create a layer of only accessible points.
+        accessible_points_lyr = "accessible_points_lyr"
+        arcpy.management.MakeFeatureLayer(output_points_fc, accessible_points_lyr, "near_park = 1")
+        temp_layers.append(accessible_points_lyr)
+        
+        # Determine if population data is available for the analysis.
+        existing_fields = [f.name for f in arcpy.ListFields(output_points_fc)]
+        has_population_field = population_field in existing_fields
+        sum_fields = [[population_field, "SUM"]] if has_population_field else []
 
-    # Save TXT/CSV outputs
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    txt_path = os.path.join(output_folder, f"accessibility_summary_{suffix}_{timestamp}.txt")
-    csv_path = os.path.join(output_folder, f"accessibility_summary_{suffix}_{timestamp}.csv")
+        # --- 1. Summarize total and accessible points/population per district ---
+        arcpy.AddMessage("Summarizing points and population within districts...")
+        summary_total = os.path.join(output_gdb, f"summary_total_{suffix}")
+        summary_accessible = os.path.join(output_gdb, f"summary_accessible_{suffix}")
+        temp_layers.extend([summary_total, summary_accessible])
+        
+        arcpy.analysis.SummarizeWithin(districts_fc, output_points_fc, summary_total, "KEEP_ALL", sum_fields, group_field=district_field)
+        arcpy.analysis.SummarizeWithin(districts_fc, accessible_points_lyr, summary_accessible, "KEEP_ALL", sum_fields, group_field=district_field)
 
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(txt_lines))
-    with open(csv_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(csv_lines))
+        # --- 2. Calculate the accessible area within each district ---
+        arcpy.AddMessage("Calculating accessible area per district...")
+        intersect_result = os.path.join(output_gdb, f"intersect_area_{suffix}")
+        temp_layers.append(intersect_result)
+        arcpy.analysis.Intersect([districts_fc, accessibility_fc], intersect_result)
+        arcpy.management.AddField(intersect_result, "AccessibleArea", "DOUBLE")
+        arcpy.management.CalculateGeometryAttributes(intersect_result, [["AccessibleArea", "AREA"]], area_unit="SQUARE_METERS")
+        
+        # --- 3. Join all summarized results to the output districts layer ---
+        arcpy.AddMessage("Joining results to districts layer...")
+        arcpy.management.JoinField(output_districts_fc, district_field, summary_total, district_field, ["Point_Count"] + ([f"Sum_{population_field}"] if has_population_field else []))
+        arcpy.management.JoinField(output_districts_fc, district_field, summary_accessible, district_field, ["Point_Count"] + ([f"Sum_{population_field}"] if has_population_field else []))
+        arcpy.management.JoinField(output_districts_fc, district_field, intersect_result, district_field, ["AccessibleArea"])
 
-    arcpy.AddMessage("Summary exported:")
-    arcpy.AddMessage(f"TXT:  {txt_path}")
-    arcpy.AddMessage(f"CSV:  {csv_path}")
+        # --- 4. Rename fields and calculate final percentages ---
+        arcpy.AddMessage("Calculating final statistics...")
+        field_mappings = {
+            "Point_Count": "Total_Points", "Point_Count_1": "Accessible_Points",
+            f"Sum_{population_field}": "Total_Population", f"Sum_{population_field}_1": "Accessible_Population"
+        }
+        for old_name, new_name in field_mappings.items():
+            if arcpy.ListFields(output_districts_fc, old_name):
+                arcpy.management.AlterField(output_districts_fc, old_name, new_name, new_name)
+        
+        arcpy.management.AddField(output_districts_fc, "Area_Covered_Percent", "DOUBLE")
+        arcpy.management.CalculateField(output_districts_fc, "Area_Covered_Percent", f"(!AccessibleArea! / !{area_field_name}!) * 100 if !{area_field_name}! > 0 else 0", "PYTHON3")
 
-    # Footer log
-    arcpy.AddMessage("===================================================")
+        # --- 5. Generate Text and CSV Reports ---
+        arcpy.AddMessage("Generating reports...")
+        report_fields = [district_field, "Area_Covered_Percent", "Total_Points", "Accessible_Points"]
+        if has_population_field:
+            report_fields += ["Total_Population", "Accessible_Population"]
+        
+        txt_lines = [f"PARK ACCESSIBILITY ANALYSIS ({distance_label}m)", "="*60]
+        csv_lines = []
+        csv_header = ["District", "Area_Covered_Percent"] + (["Population_Accessible"] if has_population_field else ["Points_Accessible"])
+
+        with arcpy.da.SearchCursor(output_districts_fc, [f for f in report_fields if arcpy.ListFields(output_districts_fc, f)]) as cursor:
+            for row in cursor:
+                row_dict = dict(zip(cursor.fields, row))
+                name = row_dict.get(district_field, "N/A")
+                area_pct = row_dict.get("Area_Covered_Percent", 0) or 0
+                
+                txt_lines.append(f"\n--- {name} ---")
+                txt_lines.append(f"Area Covered: {area_pct:.2f} %")
+                
+                if has_population_field:
+                    total_pop = row_dict.get("Total_Population", 0) or 0
+                    access_pop = row_dict.get("Accessible_Population", 0) or 0
+                    txt_lines.append(f"Population: {int(access_pop)} / {int(total_pop)} accessible")
+                    csv_lines.append([name, area_pct, access_pop])
+                else:
+                    total_pts = row_dict.get("Total_Points", 0) or 0
+                    access_pts = row_dict.get("Accessible_Points", 0) or 0
+                    txt_lines.append(f"Points: {int(access_pts)} / {int(total_pts)} accessible")
+                    csv_lines.append([name, area_pct, access_pts])
+
+        # --- Save report files ---
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        txt_path = os.path.join(output_folder, f"accessibility_summary_{suffix}_{timestamp}.txt")
+        csv_path = os.path.join(output_folder, f"accessibility_summary_{suffix}_{timestamp}.csv")
+
+        with open(txt_path, "w", encoding="utf-8") as f: f.write("\n".join(txt_lines))
+        with open(csv_path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(csv_header)
+            writer.writerows(csv_lines)
+            
+        arcpy.AddMessage(f"TXT Report: {txt_path}")
+        arcpy.AddMessage(f"CSV Report: {csv_path}")
+
+    finally:
+        # --- Final cleanup ---
+        arcpy.AddMessage("Cleaning up temporary layers...")
+        for layer in temp_layers + ["output_layer_temp", "district_layer"]:
+            if arcpy.Exists(layer):
+                arcpy.management.Delete(layer)
+
+    arcpy.AddMessage("\n===================================================")
     arcpy.AddMessage("===      PARK ACCESSIBILITY ANALYSIS DONE      ===")
     arcpy.AddMessage("===================================================")
 
 # ------------------------------------
 # Script entry point
 # ------------------------------------
-def main():
+if __name__ == "__main__":
+    # --- Get parameters from ArcGIS tool ---
     accessibility_fc   = arcpy.GetParameterAsText(0)
     districts_fc       = arcpy.GetParameterAsText(1)
     district_field     = arcpy.GetParameterAsText(2)
@@ -300,19 +240,11 @@ def main():
     group_fields_raw   = arcpy.GetParameterAsText(5)
     output_gdb         = arcpy.GetParameterAsText(6)
     distance_label     = arcpy.GetParameterAsText(7)
+    area_field         = arcpy.GetParameterAsText(8) if arcpy.GetParameterCount() > 8 else None
 
     analyze_accessibility(accessibility_fc, input_fc, population_field,
                           group_fields_raw, output_gdb, distance_label,
-                          districts_fc, district_field)
-
-    del accessibility_fc, input_fc, population_field, group_fields_raw
-    del output_gdb, distance_label, districts_fc, district_field
-
-if __name__ == "__main__":
-    main()
-
+                          districts_fc, district_field, area_field)
 
 # Author: Petr MIKESKA
-# Bachelor thesis:
-#   Hodnocení dostupnosti zelených ploch a parků pro obyvatele měst (2025)
-#   Assessing the availability of green spaces and parks for urban residents (2025)
+# Bachelor thesis (2025)

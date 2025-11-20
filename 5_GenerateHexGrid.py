@@ -1,135 +1,106 @@
 # ------------------------------------
 # Name: 5_GenerateHexGrid.py
-# This script generates a hexagonal tessellation over a polygon feature 
-# and clips it to the input extent.
+# Purpose: Generates a hexagonal grid over a specified area and clips it to the input boundary.
 # ------------------------------------
 
 import arcpy
 import sys
 import os
 
-# Always overwrite existing outputs
+# Allow overwriting outputs.
 arcpy.env.overwriteOutput = True
 
 # ------------------------------------
-# Get input parameters
+# Get input parameters from the ArcGIS tool dialog
 # ------------------------------------
 workspace         = arcpy.GetParameterAsText(0)    # Output Geodatabase
-input_feature     = arcpy.GetParameterAsText(1)    # Analysis extent (Polygon Layer)
-output_feature    = arcpy.GetParameterAsText(2)    # Output Feature Name (in GDB)
-hex_size_value    = arcpy.GetParameterAsText(3)    # Hexagon size in hectares
+input_feature     = arcpy.GetParameterAsText(1)    # Polygon layer defining the analysis extent
+output_feature    = arcpy.GetParameterAsText(2)    # Name for the output hexagon layer
+hex_size_value    = arcpy.GetParameterAsText(3)    # Desired hexagon size in hectares
 
 # ------------------------------------
-# Header log
+# Header log for user feedback
 # ------------------------------------
-arcpy.AddMessage("")
-arcpy.AddMessage("===================================================")
+arcpy.AddMessage("\n===================================================")
 arcpy.AddMessage("===          STARTING HEXAGON GENERATION        ===")
 arcpy.AddMessage("===================================================")
 arcpy.AddMessage(f"Input polygon:        {input_feature}")
-arcpy.AddMessage(f"Requested output:     {output_feature}")
+arcpy.AddMessage(f"Output name:          {output_feature}")
 arcpy.AddMessage(f"Hexagon size:         {hex_size_value} ha")
 arcpy.AddMessage("---------------------------------------------------")
 
-# ------------------------------------
-# Validate workspace
-# ------------------------------------
+# --- Validate workspace ---
 if not workspace or not workspace.lower().endswith(".gdb"):
-    arcpy.AddError(
-        "No valid output geodatabase specified. Please select an existing File Geodatabase (.gdb)."
-    )
-    sys.exit(1)
-
+    raise arcpy.ExecuteError("An existing File Geodatabase (.gdb) must be specified as the output workspace.")
 arcpy.env.workspace = workspace
 arcpy.AddMessage(f"Output geodatabase:   {workspace}")
 
-# ------------------------------------
-# Validate output feature name
-# ------------------------------------
-if not output_feature or output_feature.strip() == "":
-    arcpy.AddError("Output feature name is missing. Please specify a valid name for the output layer.")
-    sys.exit(1)
-
-# Always save into selected geodatabase
+# --- Validate output feature name ---
+if not output_feature or not output_feature.strip():
+    raise arcpy.ExecuteError("An output feature name must be provided.")
 final_output_path = os.path.join(workspace, output_feature)
-arcpy.AddMessage(f"Final output will be saved as: {final_output_path}")
+arcpy.AddMessage(f"Final output path:    {final_output_path}")
 
-# ------------------------------------
-# Validate input geometry type
-# ------------------------------------
+# --- Validate input feature ---
 if not arcpy.Exists(input_feature):
-    arcpy.AddError(
-        f"The input feature '{input_feature}' does not exist. Please check the dataset path."
-    )
-    sys.exit(1)
-
+    raise arcpy.ExecuteError(f"Input feature '{input_feature}' does not exist.")
 desc = arcpy.Describe(input_feature)
 if desc.shapeType != "Polygon":
-    arcpy.AddError(
-        f"The input layer '{input_feature}' is not a polygon feature class. Please provide a polygon layer."
-    )
-    sys.exit(1)
+    raise arcpy.ExecuteError(f"Input must be a polygon layer, but got {desc.shapeType}.")
 
-# Get extent and spatial reference
+# --- Get extent and spatial reference from input ---
 extent        = desc.extent
 extent_string = f"{extent.XMin} {extent.YMin} {extent.XMax} {extent.YMax}"
 spatial_ref   = desc.spatialReference
 
-# ------------------------------------
-# Validate hexagon size (> 0)
-# ------------------------------------
+# --- Validate coordinate system ---
+if spatial_ref.type != "Projected":
+    raise arcpy.ExecuteError("A projected coordinate system is required to accurately calculate area in hectares.")
+arcpy.AddMessage(f"Coordinate system:    {spatial_ref.name}")
+
+# --- Validate hexagon size ---
 try:
     hex_size_val = float(hex_size_value)
     if hex_size_val <= 0:
-        arcpy.AddError("Hexagon size must be greater than 0 hectares. Please enter a valid positive value.")
-        sys.exit(1)
+        raise ValueError
     hex_size = f"{hex_size_val} Hectares"
-except ValueError:
-    arcpy.AddError(f"Invalid hexagon size value: '{hex_size_value}'. Please enter a numeric value greater than 0.")
-    sys.exit(1)
+except (ValueError, TypeError):
+    raise arcpy.ExecuteError("Hexagon size must be a positive number.")
 
 # ------------------------------------
-# Generate tessellation
+# Generate hexagonal tessellation
 # ------------------------------------
-arcpy.AddMessage(f"Generating hexagonal tessellation ({hex_size}) for the input extent...")
-temp_hex = "in_memory\\temp_hex"
+arcpy.AddMessage("Generating hexagonal grid...")
+temp_hex = "in_memory/temp_hex"
 arcpy.management.GenerateTessellation(temp_hex, extent_string, "HEXAGON", hex_size, spatial_ref)
 
-# Check tessellation result
 if not arcpy.Exists(temp_hex):
-    arcpy.AddError("Hexagon tessellation failed. No output was created. Please check the input parameters.")
-    sys.exit(1)
-
-desc_output = arcpy.Describe(temp_hex)
-if desc_output.shapeType != "Polygon":
-    arcpy.AddError("The tessellation output is not a polygon feature class. Script will terminate.")
-    sys.exit(1)
-
-arcpy.AddMessage("Hexagonal tessellation successfully generated.")
+    raise arcpy.ExecuteError("Hexagon generation failed.")
+arcpy.AddMessage("Hexagonal grid generated successfully.")
 
 # ------------------------------------
-# Clip hexagons to input boundary
+# Clip hexagons to the input boundary
 # ------------------------------------
-arcpy.AddMessage("Clipping hexagons to the exact boundary of the input polygon...")
+arcpy.AddMessage("Clipping hexagons to the input feature boundary...")
 arcpy.analysis.Clip(temp_hex, input_feature, final_output_path)
-arcpy.AddMessage(f"Hexagons clipped successfully. Final output layer: {final_output_path}")
+arcpy.AddMessage(f"Clipped hexagons saved to: {final_output_path}")
 
-# ------------------------------------
-# Try to add final layer to current map (ArcGIS Pro)
-# ------------------------------------
+# --- Try to add the result to the current map ---
 try:
     aprx = arcpy.mp.ArcGISProject("CURRENT")
     m = aprx.activeMap
     m.addDataFromPath(final_output_path)
-    arcpy.AddMessage("Final output layer has been automatically added to the map.")
+    arcpy.AddMessage("Output layer added to the map.")
 except Exception:
-    arcpy.AddMessage("The final output layer could not be automatically added to the map. This step is optional.")
+    arcpy.AddMessage("Note: Could not automatically add the output layer to the map.")
 
-# ------------------------------------
-# Clean up temporary data
-# ------------------------------------
-arcpy.Delete_management(temp_hex)
-arcpy.AddMessage("Temporary data deleted.")
+# --- Clean up temporary data ---
+try:
+    if arcpy.Exists(temp_hex):
+        arcpy.management.Delete(temp_hex)
+    arcpy.AddMessage("Temporary data cleaned up.")
+except Exception as e:
+    arcpy.AddWarning(f"Could not delete temporary data: {e}")
 
 # ------------------------------------
 # Footer log
@@ -138,12 +109,5 @@ arcpy.AddMessage("===================================================")
 arcpy.AddMessage("===         HEXAGON GENERATION COMPLETED        ===")
 arcpy.AddMessage("===================================================")
 
-# Clean variables
-del workspace, input_feature, output_feature, final_output_path, hex_size_value
-del extent, extent_string, spatial_ref, hex_size
-del temp_hex, desc, desc_output
-
 # Author: Petr Mikeska
-# Bachelor thesis:
-#   Hodnocení dostupnosti zelených ploch a parků pro obyvatele měst (2025)
-#   Assessing the availability of green spaces and parks for urban residents (2025)
+# Bachelor thesis (2025)
