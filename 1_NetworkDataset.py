@@ -15,16 +15,16 @@ arcpy.env.overwriteOutput = True
 # ------------------------------------
 # Function to generate a unique path for a GDB
 # ------------------------------------
-def get_unique_path(base_path, name):
+def get_unique_path(output_folder, name):
     """
     Returns a unique path for a geodatabase (.gdb).
     If the file already exists, it appends a numerical suffix (_1, _2, etc.).
     This prevents unintentional overwriting of existing data.
     """
     i = 1
-    candidate = os.path.join(base_path, f"{name}.gdb")
+    candidate = os.path.join(output_folder, f"{name}.gdb")
     while arcpy.Exists(candidate):
-        candidate = os.path.join(base_path, f"{name}_{i}.gdb")
+        candidate = os.path.join(output_folder, f"{name}_{i}.gdb")
         i += 1
     return candidate
 
