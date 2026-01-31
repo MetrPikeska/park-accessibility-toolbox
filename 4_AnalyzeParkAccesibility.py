@@ -142,8 +142,21 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
         summary_accessible = os.path.join(output_gdb, f"summary_accessible_{suffix}")
         temp_layers.extend([summary_total, summary_accessible])
         
-        arcpy.analysis.SummarizeWithin(districts_fc, output_points_fc, summary_total, "KEEP_ALL", sum_fields, group_field=district_field)
-        arcpy.analysis.SummarizeWithin(districts_fc, accessible_points_lyr, summary_accessible, "KEEP_ALL", sum_fields, group_field=district_field)
+        # Check if district_field exists in the joined points layer
+        points_fields = [f.name for f in arcpy.ListFields(output_points_fc)]
+        actual_group_field = None
+        if district_field in points_fields:
+            actual_group_field = district_field
+        else:
+            # Look for prefixed version from Spatial Join (target_ prefix is common but depends on settings)
+            for f in points_fields:
+                if f.endswith(district_field):
+                    actual_group_field = f
+                    arcpy.AddMessage(f"Using found field '{f}' for grouping instead of '{district_field}'")
+                    break
+        
+        arcpy.analysis.SummarizeWithin(districts_fc, output_points_fc, summary_total, "KEEP_ALL", sum_fields, group_field=actual_group_field)
+        arcpy.analysis.SummarizeWithin(districts_fc, accessible_points_lyr, summary_accessible, "KEEP_ALL", sum_fields, group_field=actual_group_field)
 
         # --- 2. Calculate the accessible area within each district ---
         arcpy.AddMessage("Calculating accessible area per district...")
@@ -240,7 +253,18 @@ if __name__ == "__main__":
     group_fields_raw   = arcpy.GetParameterAsText(5)
     output_gdb         = arcpy.GetParameterAsText(6)
     distance_label     = arcpy.GetParameterAsText(7)
-    area_field         = arcpy.GetParameterAsText(8) if arcpy.GetParameterCount() > 8 else None
+    
+    # Safely get parameter 8 if it exists
+    area_field = None
+    try:
+        if arcpy.GetParameterCount() > 8:
+            area_field = arcpy.GetParameterAsText(8)
+    except Exception:
+        # If GetParameterCount() fails, try getting parameter 8 directly
+        try:
+            area_field = arcpy.GetParameterAsText(8)
+        except Exception:
+            pass
 
     analyze_accessibility(accessibility_fc, input_fc, population_field,
                           group_fields_raw, output_gdb, distance_label,
