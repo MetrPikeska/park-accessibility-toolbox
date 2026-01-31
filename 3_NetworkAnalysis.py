@@ -10,46 +10,8 @@ import os
 # Always overwrite outputs to allow for script re-runs.
 arcpy.env.overwriteOutput = True
 
-# ------------------------------------
-# Apply green symbology to a polygon layer
-# ------------------------------------
-def apply_green_symbology(layer_name):
-    """
-    Applies a default green symbology to a polygon layer in the current map.
-    If no map is available or active, the function continues without error.
-    """
-    try:
-        aprx = arcpy.mp.ArcGISProject("CURRENT")
-        m = aprx.activeMap
-        
-        # Find the layer in the map by its name.
-        layer_found = None
-        for lyr in m.listLayers():
-            if lyr.name == layer_name or os.path.basename(lyr.dataSource) == os.path.basename(layer_name):
-                layer_found = lyr
-                break
-        
-        if layer_found and layer_found.isFeatureLayer:
-            # Get the layer's symbology object.
-            sym = layer_found.symbology
-            if sym.renderer.type != 'SimpleRenderer':
-                # Ensure the renderer is simple before applying color.
-                sym.updateRenderer('SimpleRenderer')
-            
-            # Define colors for the fill and outline.
-            green_color = {'RGB': [76, 230, 0, 100]}  # Bright green with some transparency
-            dark_green_outline = {'RGB': [38, 115, 0, 255]}  # Darker green outline
-            
-            # Apply the defined colors to the symbol.
-            sym.renderer.symbol.color = green_color
-            sym.renderer.symbol.outlineColor = dark_green_outline
-            sym.renderer.symbol.outlineWidth = 1
-            
-            layer_found.symbology = sym
-            arcpy.AddMessage("Green symbology applied to the output layer.")
-    except Exception as e:
-        # Continue silently if symbology cannot be applied (e.g., when run as a background script).
-        arcpy.AddMessage(f"Note: Could not apply symbology automatically: {str(e)}")
+
+
 
 # ------------------------------------
 # Get input parameters from the user via the ArcGIS tool dialog
@@ -147,9 +109,12 @@ try:
     temp_polygons = os.path.join(gdb_path, "temp_service_area")
     
     # Access the 'Polygons' sub-layer of the network analysis layer.
-    polygons_path = arcpy.na.GetNAClassName(service_area_layer, "Polygons")
-    if not polygons_path:
-        polygons_path = f"{service_area_layer}/Polygons"
+    na_classes = arcpy.na.GetNAClassNames(service_area_layer)
+    # The key is 'SAPolygons' for Service Area Polygons in MakeServiceAreaLayer
+    # We use a fallback to 'Polygons' or the first available key if not found.
+    polygons_key = "SAPolygons" if "SAPolygons" in na_classes else "Polygons"
+    polygons_sublayer_name = na_classes.get(polygons_key, "Polygons")
+    polygons_path = f"{service_area_layer}\\{polygons_sublayer_name}"
 
     arcpy.management.CopyFeatures(polygons_path, temp_polygons)
     arcpy.AddMessage(f"Temporary polygons saved to: {temp_polygons}")
