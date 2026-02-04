@@ -8,9 +8,6 @@ import sys
 import csv
 from datetime import datetime
 
-# Import toolbox
-arcpy.ImportToolbox(r'C:\Users\Metr\Documents\GitHub\park-accessibility-toolbox\toolbox\Accessibility_of_urban_greenery.atbx')
-
 # ------------------------------------
 # Function to validate coordinate system consistency
 # ------------------------------------
@@ -52,17 +49,6 @@ def validate_crs_consistency(layers, layer_names):
             raise arcpy.ExecuteError("Coordinate system mismatch between input layers.")
     
     return reference_sr
-
-# ------------------------------------
-# Function to check if a field exists in a layer
-# ------------------------------------
-def check_field_exists(layer, field_name):
-    """
-    Checks if the field exists in the layer.
-    """
-    fields = [f.name for f in arcpy.ListFields(layer)]
-    if field_name not in fields:
-        raise ValueError(f"Field '{field_name}' does not exist in the layer '{layer}'. Available fields: {fields}")
 
 # ------------------------------------
 # Main analysis function
@@ -156,9 +142,6 @@ def analyze_accessibility(accessibility_fc, input_fc, population_field, group_fi
         summary_accessible = os.path.join(output_gdb, f"summary_accessible_{suffix}")
         temp_layers.extend([summary_total, summary_accessible])
         
-        # Check if the district field exists
-        check_field_exists(districts_fc, district_field)
-        
         arcpy.analysis.SummarizeWithin(districts_fc, output_points_fc, summary_total, "KEEP_ALL", sum_fields, group_field=district_field)
         arcpy.analysis.SummarizeWithin(districts_fc, accessible_points_lyr, summary_accessible, "KEEP_ALL", sum_fields, group_field=district_field)
 
@@ -251,20 +234,13 @@ if __name__ == "__main__":
     # --- Get parameters from ArcGIS tool ---
     accessibility_fc   = arcpy.GetParameterAsText(0)
     districts_fc       = arcpy.GetParameterAsText(1)
-    district_field     = "NAZ_OBEC"
+    district_field     = arcpy.GetParameterAsText(2)
     input_fc           = arcpy.GetParameterAsText(3)
     population_field   = arcpy.GetParameterAsText(4)
     group_fields_raw   = arcpy.GetParameterAsText(5)
     output_gdb         = arcpy.GetParameterAsText(6)
     distance_label     = arcpy.GetParameterAsText(7)
-    area_field         = arcpy.GetParameterAsText(8) if arcpy.GetParameterCount('AnalyzeParkAccessibility') > 8 else None
-
-    # Update the path to the layer
-    districts_fc = r"C:\\Skola\\BAKALARKA\\ODEVZDANI 2\\ODEVZDANI\\mikeska25\\vstupni_data\\data_testovani.gdb\\CastiObce_Olomouce"
-
-    # Check available fields in the layer
-    fields = [f.name for f in arcpy.ListFields(districts_fc)]
-    print(f"Available fields in {districts_fc}: {fields}")
+    area_field         = arcpy.GetParameterAsText(8) if arcpy.GetParameterAsText(8) else None
 
     analyze_accessibility(accessibility_fc, input_fc, population_field,
                           group_fields_raw, output_gdb, distance_label,
