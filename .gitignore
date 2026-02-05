@@ -4,6 +4,7 @@ test/
 tests/
 resty/
 
+zaloha/
 # ArcGIS Pro files and geodatabases
 *.aprx
 *.tbx

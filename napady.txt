@@ -1,0 +1,3 @@
+harmonizace proceseu
+vytvoreni dalsiho scripty pro spusteni celeho procesu
+moznost spustit u scriptu spustit opakovane s jinymy parametry, napr vzdalenost
