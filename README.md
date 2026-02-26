@@ -22,7 +22,7 @@ The toolbox follows a sequential workflow, where the output of one tool often se
      v
 [3. Service Area] -> Calculates walkable areas around parks.
      |   \
-     |    \__________________________________________
+     |    \_________________________________________
      |                                             |
      v                                             v
 [4. District Analysis] -> Aggregates results by   [5. Hexagon Grid] -> Creates the grid for analysis.
