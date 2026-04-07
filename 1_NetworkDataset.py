@@ -39,7 +39,10 @@ def create_network_dataset(input_roads, output_folder, network_name_raw):
     arcpy.AddMessage("===================================================")
 
     # Clean the network name (remove any path, leaving only the file name)
-    network_name = os.path.basename(network_name_raw.strip())
+    network_name_raw = os.path.basename(network_name_raw.strip())
+    # Replace hyphens with underscores for geodatabase compatibility
+    network_name = network_name_raw.replace("-", "_")
+
     extension_checked_out = False  # Flag to check if the extension was activated
 
     try:
