@@ -96,3 +96,4 @@ This work is based on the bachelor's thesis "Assessing the availability of green
 ## License
 
 This project is licensed under the **MIT License**.
+
