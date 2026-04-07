@@ -1,9 +1,30 @@
+# Test folders
+testy/
+test/
+tests/
+resty/
+
+zaloha/
+# ArcGIS Pro files and geodatabases
+*.aprx
+*.tbx
+*.ags
+*.mxd
+*.gdb/
+*.gdb
+*.sde
+# All geodatabase folders
+**/*.gdb/
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+env/
+venv/
+ENV/
 build/
 develop-eggs/
 dist/
@@ -16,40 +37,25 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# Virtual environments
-venv/
-ENV/
-env/
-.venv
-
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+
+# OS
 .DS_Store
+Thumbs.db
+desktop.ini
 
-# ArcGIS
-*.gdb/
-*.sde
-*.mxd
-*.aprx
-*.lyrx
+# Logs
+*.log
 
-# Generated test files and outputs
-testy/
-zaloha/
-*.csv
-*.txt
-
-# Backups
-*.backup
+# Temporary files
+*.tmp
 *.bak

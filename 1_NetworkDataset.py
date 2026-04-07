@@ -5,7 +5,9 @@
 # ------------------------------------
 
 import arcpy
+import arcpy.na
 import os
+import sys
 
 # Allow overwriting outputs to facilitate script re-runs.
 arcpy.env.overwriteOutput = True
@@ -13,16 +15,16 @@ arcpy.env.overwriteOutput = True
 # ------------------------------------
 # Function to generate a unique path for a GDB
 # ------------------------------------
-def get_unique_path(base_path, name):
+def get_unique_path(output_folder, name):
     """
     Returns a unique path for a geodatabase (.gdb).
     If the file already exists, it appends a numerical suffix (_1, _2, etc.).
     This prevents unintentional overwriting of existing data.
     """
     i = 1
-    candidate = os.path.join(base_path, f"{name}.gdb")
+    candidate = os.path.join(output_folder, f"{name}.gdb")
     while arcpy.Exists(candidate):
-        candidate = os.path.join(base_path, f"{name}_{i}.gdb")
+        candidate = os.path.join(output_folder, f"{name}_{i}.gdb")
         i += 1
     return candidate
 
@@ -44,16 +46,32 @@ def create_network_dataset(input_roads, output_folder, network_name_raw):
 
     try:
         # --- Check for and check out the Network Analyst extension ---
-        if arcpy.CheckExtension("Network") != "Available":
+        extension_status = arcpy.CheckExtension("Network")
+        arcpy.AddMessage(f"Network Analyst extension status: {extension_status}")
+        
+        if extension_status == "Available":
+            arcpy.CheckOutExtension("Network")
+            extension_checked_out = True
+            arcpy.AddMessage("Network Analyst extension checked out successfully.")
+        elif extension_status == "NotLicensed":
             arcpy.AddError(
-                "Network Analyst extension is not available. "
-                "Please verify your ArcGIS Pro license or enable the extension."
+                "Network Analyst extension is not licensed. "
+                "Your ArcGIS Pro license does not include Network Analyst. "    
+                "Required: ArcGIS Pro Advanced or Network Analyst extension license."
             )
-            raise arcpy.ExecuteError("Network Analyst extension is not available.")
-            
-        arcpy.CheckOutExtension("Network")
-        extension_checked_out = True
-        arcpy.AddMessage("Network Analyst extension checked out successfully.")
+            raise arcpy.ExecuteError("Network Analyst extension is not licensed.")
+        elif extension_status == "Unavailable":
+            arcpy.AddError(
+                "Network Analyst extension is currently unavailable (already in use). "
+                "Please close other applications using this extension."
+            )
+            raise arcpy.ExecuteError("Network Analyst extension is unavailable.")
+        else:
+            arcpy.AddError(
+                f"Network Analyst extension status: {extension_status}. "
+                "Please verify your ArcGIS Pro license or enable the extension in Project > Licensing."
+            )
+            raise arcpy.ExecuteError(f"Network Analyst extension is not available: {extension_status}")
 
         # --- Validate the geometry type of the input layer (must be polyline) ---
         desc_input = arcpy.Describe(input_roads)
@@ -96,15 +114,19 @@ def create_network_dataset(input_roads, output_folder, network_name_raw):
         # --- Create and build the network dataset ---
         network_dataset_path = os.path.join(feature_dataset, network_name)
         arcpy.AddMessage("Creating Network Dataset...")
+        
+        # Using correct Network Analyst tool syntax with proper parameters
         arcpy.na.CreateNetworkDataset(
-            feature_dataset=feature_dataset,
-            out_name=network_name,
-            source_feature_class_names="Roads",
-            elevation_model="ELEVATION_FIELDS"
+            feature_dataset,
+            network_name,
+            ["Roads"],
+            "ELEVATION_FIELDS"
         )
+        arcpy.AddMessage("Network Dataset created.")
+        
         # Building the network is crucial for calculations and analyses.
         arcpy.na.BuildNetwork(network_dataset_path)
-        arcpy.AddMessage("Network Dataset created and built successfully.")
+        arcpy.AddMessage("Network Dataset built successfully.")
         
         # --- Final log with key information about the outputs ---
         arcpy.AddMessage("---------------------------------------------------")
@@ -132,13 +154,25 @@ def create_network_dataset(input_roads, output_folder, network_name_raw):
 # Script entry point when run from ArcGIS
 # ------------------------------------
 if __name__ == "__main__":
-    # Load parameters from the ArcGIS Pro dialog
-    input_roads = arcpy.GetParameterAsText(0)      # Input road network layer
-    output_folder = arcpy.GetParameterAsText(1)    # Target folder for the GDB
-    network_name_raw = arcpy.GetParameterAsText(2) # Desired name for the network dataset
+    try:
+        # Load parameters from the ArcGIS Pro dialog
+        input_roads = arcpy.GetParameterAsText(0)      # Input road network layer
+        output_folder = arcpy.GetParameterAsText(1)    # Target folder for the GDB
+        network_name_raw = arcpy.GetParameterAsText(2) # Desired name for the network dataset
 
-    # Run the main function with the loaded parameters
-    network_dataset = create_network_dataset(input_roads, output_folder, network_name_raw)
+        # Debug output
+        arcpy.AddMessage("Script started successfully")
+        arcpy.AddMessage(f"Python version: {sys.version}")
+        arcpy.AddMessage(f"ArcPy version: {arcpy.GetInstallInfo()['Version']}")
+        
+        # Run the main function with the loaded parameters
+        network_dataset = create_network_dataset(input_roads, output_folder, network_name_raw)
+    except Exception as e:
+        arcpy.AddError(f"Script failed with error: {str(e)}")
+        arcpy.AddError(f"Error type: {type(e).__name__}")
+        import traceback
+        arcpy.AddError(traceback.format_exc())
+        raise
 
 # Author: Petr Mikeska
 # Bachelor thesis:

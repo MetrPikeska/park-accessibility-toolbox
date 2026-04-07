@@ -240,7 +240,7 @@ if __name__ == "__main__":
     group_fields_raw   = arcpy.GetParameterAsText(5)
     output_gdb         = arcpy.GetParameterAsText(6)
     distance_label     = arcpy.GetParameterAsText(7)
-    area_field         = arcpy.GetParameterAsText(8) if arcpy.GetParameterCount() > 8 else None
+    area_field         = arcpy.GetParameterAsText(8) if arcpy.GetParameterAsText(8) else None
 
     analyze_accessibility(accessibility_fc, input_fc, population_field,
                           group_fields_raw, output_gdb, distance_label,

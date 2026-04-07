@@ -1,0 +1,4 @@
+harmonizace proceseu
+vytvoreni dalsiho scripty pro spusteni celeho procesu
+moznost spustit u scriptu spustit opakovane s jinymy parametry, napr vzdalenost 200. 400 a 600m
+4. script vyresit nacitani pevne danych atributu 

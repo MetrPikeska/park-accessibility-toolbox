@@ -25,10 +25,10 @@ The toolbox follows a sequential workflow, where the output of one tool often se
      |    \_________________________________________
      |                                             |
      v                                             v
-[4. District Analysis] -> Aggregates results by    [5. Hexagon Grid] -> Creates the grid for analysis.
-     |                     administrative unit.    |         
-     |                                             |6. Hexagon Analysis] -> Aggregates results into a uniform grid.
-[Reports & Maps]                                
+[4. District Analysis] -> Aggregates results by   [5. Hexagon Grid] -> Creates the grid for analysis.
+     |                     administrative unit.    |                     
+     |                                             |
+[Reports & Maps]                     [6. Hexagon Analysis] -> Aggregates results into a uniform grid.   
 ```
 
 ---
