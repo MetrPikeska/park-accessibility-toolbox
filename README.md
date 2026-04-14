@@ -89,7 +89,7 @@ Department of Geoinformatics, Palacký University Olomouc
 -   **Instagram:** [@petamikeska](https://www.instagram.com/petamikeska)
 
 This work is based on the bachelor's thesis "Assessing the availability of green spaces and parks for urban residents" (2025).  
-**Thesis Web:** [https://www.geoinformatics.upol.cz/dprace/bakalarske/mikeska25/](https://www.geoinformatics.upol.cz/dprace/bakalarske/mikeska25/)
+**Thesis Web:** [https://www.geoinformatics.upol.cz/dprace/bakalarske/mikeska25/](https://petrmikeska.cz/bp)
 
 ---
 
